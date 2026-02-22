@@ -33,3 +33,8 @@ pio run -t upload
 pio run -t compiledb
 ```
 
+
+## Serial monitoring
+```
+minicom -b 115200 -D /dev/ttyACM0
+```
