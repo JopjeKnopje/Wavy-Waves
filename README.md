@@ -29,6 +29,6 @@ pio run -t upload
 
 ## compile_commands.json
 ```
-pio run -t compiledb -e uno
+pio run -t compiledb
 ```
 
