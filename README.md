@@ -16,7 +16,18 @@ DS3231 rtc module
 
 
 # Dev setup
+## espidf install instructions
+Because we're using some extra python modules for testing the setup steps for espidf are more involved.
+https://docs.espressif.com/projects/esp-idf/en/stable/esp32/contribute/esp-idf-tests-with-pytest.html#id1
+```bash
+bash install.sh --enable-ci --enable-pytest
+```
 
+### Setup qemu
+```bash
+python $IDF_PATH/tools/idf_tools.py install qemu-xtensa qemu-riscv32
+
+```
 ### compile_commands.json
 
 If `compile_commands.json` lives in a build directory, you should symlink it to the root of your source tree.
@@ -33,3 +44,8 @@ To set this up have a look at [this](https://docs.espressif.com/projects/esp-idf
 ```
 minicom -b 115200 -D /dev/ttyACM0
 ```
+
+
+
+### Sources
+- [QEMU monitor](https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-guides/tools/qemu.html#running-an-application)
