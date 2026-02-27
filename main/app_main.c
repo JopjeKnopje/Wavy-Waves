@@ -1,118 +1,42 @@
+#include "esp_chip_info.h"
+#include "esp_flash.h"
+#include "esp_system.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "sdkconfig.h"
+#include <inttypes.h>
+#include <stdio.h>
 
-#include "esp_log.h"
-#include "esp_wifi.h"
-
-#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(4, 4, 0)
-#include "esp_mac.h"
-#endif
-
-#include "espnow.h"
-#include "espnow_storage.h"
-#include "espnow_utils.h"
-
-#include "driver/uart.h"
-
-// You can modify these according to your boards.
-#define UART_BAUD_RATE 115200
-#define UART_PORT_NUM  0
-#define UART_TX_IO     UART_PIN_NO_CHANGE
-#define UART_RX_IO     UART_PIN_NO_CHANGE
-
-static const char *TAG = "app_main";
-
-static void app_uart_read_task(void *arg)
+void app_main(void)
 {
-    esp_err_t ret  = ESP_OK;
-    uint32_t count = 0;
-    size_t size    = 0;
-    uint8_t *data  = ESP_CALLOC(1, ESPNOW_DATA_LEN);
+    printf("Hello world!\n");
 
-    ESP_LOGI(TAG, "Uart read handle task is running");
+    /* Print chip information */
+    esp_chip_info_t chip_info;
+    uint32_t flash_size;
+    esp_chip_info(&chip_info);
+    printf("This is %s chip with %d CPU core(s), %s%s%s%s, ", CONFIG_IDF_TARGET, chip_info.cores,
+           (chip_info.features & CHIP_FEATURE_WIFI_BGN) ? "WiFi/" : "",
+           (chip_info.features & CHIP_FEATURE_BT) ? "BT" : "",
+           (chip_info.features & CHIP_FEATURE_BLE) ? "BLE" : "",
+           (chip_info.features & CHIP_FEATURE_IEEE802154) ? ", 802.15.4 (Zigbee/Thread)" : "");
 
-    espnow_frame_head_t frame_head = {
-        .retransmit_count = CONFIG_RETRY_NUM,
-        .broadcast        = true,
-    };
-
-    for (;;) {
-        size = uart_read_bytes(UART_PORT_NUM, data, ESPNOW_DATA_LEN, pdMS_TO_TICKS(10));
-        ESP_ERROR_CONTINUE(size <= 0, "");
-
-        ret = espnow_send(ESPNOW_DATA_TYPE_DATA, ESPNOW_ADDR_BROADCAST, data, size, &frame_head, portMAX_DELAY);
-        ESP_ERROR_CONTINUE(ret != ESP_OK, "<%s> espnow_send", esp_err_to_name(ret));
-
-        ESP_LOGI(TAG, "espnow_send, count: %" PRIu32 ", size: %u, data: %s", count++, size, data);
-        memset(data, 0, ESPNOW_DATA_LEN);
+    unsigned major_rev = chip_info.revision / 100;
+    unsigned minor_rev = chip_info.revision % 100;
+    printf("silicon revision v%d.%d, ", major_rev, minor_rev);
+    if (esp_flash_get_size(NULL, &flash_size) != ESP_OK)
+    {
+        printf("Get flash size failed");
+        return;
     }
 
-    ESP_LOGI(TAG, "Uart handle task is exit");
+    printf("%" PRIu32 "MB %s flash\n", flash_size / (uint32_t)(1024 * 1024),
+           (chip_info.features & CHIP_FEATURE_EMB_FLASH) ? "embedded" : "external");
 
-    ESP_FREE(data);
-    vTaskDelete(NULL);
-}
+    printf("Minimum free heap size: %" PRIu32 " bytes\n", esp_get_minimum_free_heap_size());
 
-static void app_uart_initialize()
-{
-    uart_config_t uart_config = {
-        .baud_rate = UART_BAUD_RATE,
-        .data_bits = UART_DATA_8_BITS,
-        .parity    = UART_PARITY_DISABLE,
-        .stop_bits = UART_STOP_BITS_1,
-        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
-#if SOC_UART_SUPPORT_REF_TICK
-        .source_clk = UART_SCLK_REF_TICK,
-#elif SOC_UART_SUPPORT_XTAL_CLK
-        .source_clk = UART_SCLK_XTAL,
-#endif
-    };
-
-    ESP_ERROR_CHECK(uart_param_config(UART_PORT_NUM, &uart_config));
-    ESP_ERROR_CHECK(uart_set_pin(UART_PORT_NUM, UART_TX_IO, UART_RX_IO, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
-    ESP_ERROR_CHECK(uart_driver_install(UART_PORT_NUM, 8 * ESPNOW_DATA_LEN, 8 * ESPNOW_DATA_LEN, 0, NULL, 0));
-
-    xTaskCreate(app_uart_read_task, "app_uart_read_task", 4 * 1024, NULL, tskIDLE_PRIORITY + 1, NULL);
-}
-
-static void app_wifi_init()
-{
-    esp_event_loop_create_default();
-
-    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-
-    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
-    ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_RAM));
-    ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
-    ESP_ERROR_CHECK(esp_wifi_start());
-}
-
-static esp_err_t app_uart_write_handle(uint8_t *src_addr, void *data,
-                                       size_t size, wifi_pkt_rx_ctrl_t *rx_ctrl)
-{
-    ESP_PARAM_CHECK(src_addr);
-    ESP_PARAM_CHECK(data);
-    ESP_PARAM_CHECK(size);
-    ESP_PARAM_CHECK(rx_ctrl);
-
-    static uint32_t count = 0;
-
-    ESP_LOGI(TAG, "espnow_recv, <%" PRIu32 "> [" MACSTR "][%d][%d][%u]: %.*s",
-             count++, MAC2STR(src_addr), rx_ctrl->channel, rx_ctrl->rssi, size, size, (char *)data);
-
-    return ESP_OK;
-}
-
-void app_main()
-{
-    espnow_storage_init();
-
-    app_uart_initialize();
-    app_wifi_init();
-
-    espnow_config_t espnow_config = ESPNOW_INIT_CONFIG_DEFAULT();
-    espnow_init(&espnow_config);
-
-    espnow_set_config_for_data_type(ESPNOW_DATA_TYPE_DATA, true, app_uart_write_handle);
+    vTaskDelay(1000 / portTICK_PERIOD_MS);
+    printf("Restarting now.\n");
+    fflush(stdout);
+    esp_restart();
 }
