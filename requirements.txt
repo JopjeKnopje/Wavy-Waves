@@ -1,0 +1,9 @@
+entity==0.8.0
+esp_docs==2.1.5
+pip==25.1.1
+pytest==9.0.2
+pytest_embedded==2.6.0
+pytest_embedded_idf==2.6.0
+pytest_embedded_jtag==2.6.0
+pytest_embedded_serial==2.6.0
+pytest_embedded_serial_esp==2.6.0
