@@ -1,15 +1,11 @@
-import logging
+import pytest
+from pytest_embedded import Dut
 
-
-def test_hello_world(dut) -> None:
-    # expect from what esptool.py printed to sys.stdout
-    dut.expect('Hash of data verified.')
-
-    # now the `dut.expect` would return a `re.Match` object if succeeded
-    res = dut.expect(r'Hello (\w+)!')
-
-    # don't forget to decode, since the serial outputs are all bytes
-    logging.info(f'hello to {res.group(1).decode("utf8")}')
-
-    # of course you can just don't care about the return value, do an assert only :)
-    dut.expect('Restarting')
+@pytest.mark.supported_targets
+@pytest.mark.generic
+def test_device_id(dut: Dut) -> None:
+    dut.run_all_single_board_cases(name='device_id')
+   
+    # Wait for the output with a timeout
+    dut.expect('Device ID:')
+  

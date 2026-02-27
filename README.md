@@ -18,7 +18,7 @@ DS3231 rtc module
 # Dev setup
 
 ## Python & Pip & Pytest
-Install python `3.13.x` from [python.org](https://www.python.org/downloads/release/python-31312/) or using [pyenv](https://github.com/pyenv/pyenv?tab=readme-ov-file#1-automatic-installer-recommended)
+Install python `>3.7.x` from [python.org](https://www.python.org/downloads/release/python-31312/) or using [pyenv](https://github.com/pyenv/pyenv?tab=readme-ov-file#1-automatic-installer-recommended)
 
 ```
 pip install -r requirements.txt
