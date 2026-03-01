@@ -16,8 +16,20 @@ DS3231 rtc module
 
 
 # Dev setup
+## espidf 
+> [!note]  
+> This is needed for actually building the firmware, the other steps are just developer tools.
+
+Follow the steps from espressifs [instructions](https://docs.espressif.com/projects/esp-idf/en/stable/esp32/get-started/linux-macos-setup.html)
+
+I've created an alias in my `.zshrc` file to activate the espidf environment.
+```zsh
+alias get_idf='. $HOME/esp/esp-idf/export.sh'
+```
+
+
 ## LSP
-Install the [`esp-clangd`]() version.
+Install the espressifs [`esp-clangd`](https://github.com/espressif/llvm-project) version.
 ```bash
 idf_tools.py install esp-clang
 ```
@@ -27,14 +39,38 @@ Use clang instead of gcc to compile esp-idf project, for some reason this genera
 IDF_TOOLCHAIN=clang idf.py reconfigure
 ```
 
-#### Neo-vim plugin
+### Neo-vim plugin
 https://github.com/Aietes/esp32.nvim
 
 ### compile_commands.json
-
 If `compile_commands.json` lives in a build directory, you should symlink it to the root of your source tree.
 ```
 ln -s build/compile_commands.json .
+```
+
+
+## Formatting tools
+I have some pre-commits hooks setup using [prek](https://github.com/j178/prek?tab=readme-ov-file#installation) which runs [clang-formatter]().
+You can install clang-format with
+```bash
+apt install clang-format
+```
+
+And prek using the following command, or any other of the [installation methods](https://github.com/j178/prek?tab=readme-ov-file#installation).
+```bash
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/j178/prek/releases/download/v0.3.4/prek-installer.sh | sh
+```
+
+To install prek into the repo run.
+```bash
+prek install
+```
+
+prek will run automatically on every commit you make, but you can run it manually using.
+```bash
+```
+```
+prek run --all-files
 ```
 
 
