@@ -24,19 +24,20 @@ static const char *TAG = "app_main";
 
 static void app_uart_read_task(void *arg)
 {
-    esp_err_t ret  = ESP_OK;
+    esp_err_t ret = ESP_OK;
     uint32_t count = 0;
-    size_t size    = 0;
-    uint8_t *data  = ESP_CALLOC(1, ESPNOW_DATA_LEN);
+    size_t size = 0;
+    uint8_t *data = ESP_CALLOC(1, ESPNOW_DATA_LEN);
 
     ESP_LOGI(TAG, "Uart read handle task is running");
 
     espnow_frame_head_t frame_head = {
         .retransmit_count = CONFIG_RETRY_NUM,
-        .broadcast        = true,
+        .broadcast = true,
     };
 
-    for (;;) {
+    for (;;)
+    {
         size = uart_read_bytes(UART_PORT_NUM, data, ESPNOW_DATA_LEN, pdMS_TO_TICKS(10));
         ESP_ERROR_CONTINUE(size <= 0, "");
 
@@ -58,7 +59,7 @@ static void app_uart_initialize()
     uart_config_t uart_config = {
         .baud_rate = UART_BAUD_RATE,
         .data_bits = UART_DATA_8_BITS,
-        .parity    = UART_PARITY_DISABLE,
+        .parity = UART_PARITY_DISABLE,
         .stop_bits = UART_STOP_BITS_1,
         .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
 #if SOC_UART_SUPPORT_REF_TICK
@@ -88,8 +89,7 @@ static void app_wifi_init()
     ESP_ERROR_CHECK(esp_wifi_start());
 }
 
-static esp_err_t app_uart_write_handle(uint8_t *src_addr, void *data,
-                                       size_t size, wifi_pkt_rx_ctrl_t *rx_ctrl)
+static esp_err_t app_uart_write_handle(uint8_t *src_addr, void *data, size_t size, wifi_pkt_rx_ctrl_t *rx_ctrl)
 {
     ESP_PARAM_CHECK(src_addr);
     ESP_PARAM_CHECK(data);
@@ -98,8 +98,8 @@ static esp_err_t app_uart_write_handle(uint8_t *src_addr, void *data,
 
     static uint32_t count = 0;
 
-    ESP_LOGI(TAG, "espnow_recv, <%" PRIu32 "> [" MACSTR "][%d][%d][%u]: %.*s",
-             count++, MAC2STR(src_addr), rx_ctrl->channel, rx_ctrl->rssi, size, size, (char *)data);
+    ESP_LOGI(TAG, "espnow_recv, <%" PRIu32 "> [" MACSTR "][%d][%d][%u]: %.*s", count++, MAC2STR(src_addr),
+             rx_ctrl->channel, rx_ctrl->rssi, size, size, (char *)data);
 
     return ESP_OK;
 }
