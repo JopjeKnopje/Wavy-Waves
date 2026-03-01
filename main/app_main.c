@@ -3,6 +3,10 @@
 
 #include "esp_log.h"
 #include "esp_wifi.h"
+#include "lwip/sockets.h"
+#include <stdio.h>
+#include <string.h>
+#include <sys/unistd.h>
 
 #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(4, 4, 0)
 #include "esp_mac.h"
@@ -73,7 +77,7 @@ static void app_uart_initialize()
     ESP_ERROR_CHECK(uart_set_pin(UART_PORT_NUM, UART_TX_IO, UART_RX_IO, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
     ESP_ERROR_CHECK(uart_driver_install(UART_PORT_NUM, 8 * ESPNOW_DATA_LEN, 8 * ESPNOW_DATA_LEN, 0, NULL, 0));
 
-    xTaskCreate(app_uart_read_task, "app_uart_read_task", 4 * 1024, NULL, tskIDLE_PRIORITY + 1, NULL);
+    // xTaskCreate(app_uart_read_task, "app_uart_read_task", 4 * 1024, NULL, tskIDLE_PRIORITY + 1, NULL);
 }
 
 static void app_wifi_init()
@@ -104,12 +108,61 @@ static esp_err_t app_uart_write_handle(uint8_t *src_addr, void *data, size_t siz
     return ESP_OK;
 }
 
+void send_message()
+{
+    uint32_t count = 0;
+
+    esp_err_t ret = ESP_OK;
+    size_t size = 0;
+    char data[ESPNOW_DATA_LEN];
+
+    espnow_frame_head_t frame_head = {
+        .retransmit_count = CONFIG_RETRY_NUM,
+        .broadcast = true,
+    };
+
+    while (1)
+    {
+        snprintf(data, ESPNOW_DATA_LEN, "test data: [%u]", count);
+        size = strlen(data);
+        ret = espnow_send(ESPNOW_DATA_TYPE_DATA, ESPNOW_ADDR_BROADCAST, data, size, &frame_head, portMAX_DELAY);
+        if (ret != ESP_OK)
+            ESP_LOGE(TAG, "<%s> espnow_send", esp_err_to_name(ret));
+
+        ESP_LOGI(TAG, "espnow_send, count: %" PRIu32 ", size: %u, data: %s", count++, size, data);
+        memset(data, 0, ESPNOW_DATA_LEN);
+
+        vTaskDelay(1500 / portTICK_PERIOD_MS);
+    }
+    vTaskDelete(NULL);
+}
+
+typedef struct
+{
+    const char *text;
+    const unsigned int time_ms;
+} t_params;
+
+void test(void *param)
+{
+    t_params cfg = *(t_params *)param;
+    while (1)
+    {
+        printf("test123 %s\n", cfg.text);
+        fflush(stdout);
+        vTaskDelay(cfg.time_ms / portTICK_PERIOD_MS);
+    }
+    vTaskDelete(NULL);
+}
+
 void app_main()
 {
     espnow_storage_init();
 
     app_uart_initialize();
     app_wifi_init();
+
+    xTaskCreate(send_message, "send_message", 4 * 1024, NULL, tskIDLE_PRIORITY + 1, NULL);
 
     espnow_config_t espnow_config = ESPNOW_INIT_CONFIG_DEFAULT();
     espnow_init(&espnow_config);

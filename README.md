@@ -16,6 +16,19 @@ DS3231 rtc module
 
 
 # Dev setup
+## LSP
+Install the [`esp-clangd`]() version.
+```bash
+idf_tools.py install esp-clang
+```
+
+Use clang instead of gcc to compile esp-idf project, for some reason this generates the correct `compile_commands.json`.
+```bash
+IDF_TOOLCHAIN=clang idf.py reconfigure
+```
+
+#### Neo-vim plugin
+https://github.com/Aietes/esp32.nvim
 
 ### compile_commands.json
 
