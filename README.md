@@ -14,6 +14,28 @@ BMP280 sensor
 DS3231 rtc module
 ![DS3231 rtc module](https://electropeak.com/learn/wp-content/uploads/2021/09/DS3231-1.jpg)
 
+# Building the firmware
+
+The code checks whether its building for the Senor board or the so called Mothership™
+In order to build the project for the Mothership™, just set the `WW_MOTHERSHIP` environment variable like shown below.
+
+> [!warning]  
+> Keep in mind that when changing `WW_MOTHERSHIP` between builds you have to run `idf.py clean` CMake doesn't pick up on environment changes
+
+```bash
+WW_MOTHERSHIP="" idf.py build
+```
+
+
+Flash the board without any montioring.
+```bash
+idf.py flash
+```
+
+Flash and monitor the output with a port specified.
+```bash
+idf.py flash -b 921600 -p /dev/ttyUSB0 monitor
+```
 
 # Dev setup
 ## espidf 
@@ -34,10 +56,7 @@ Install the espressifs [`esp-clangd`](https://github.com/espressif/llvm-project)
 idf_tools.py install esp-clang
 ```
 
-Use clang instead of gcc to compile esp-idf project, for some reason this generates the correct `compile_commands.json`.
-```bash
-IDF_TOOLCHAIN=clang idf.py reconfigure
-```
+We use clang instead of gcc to compile esp-idf project, for some reason this generates the correct `compile_commands.json`.
 
 ### Neo-vim plugin
 https://github.com/Aietes/esp32.nvim

@@ -8,6 +8,15 @@ if(NOT DEFINED IDF_TARGET)
     set(IDF_TARGET "esp32")
 endif()
 
+if (DEFINED ENV{WW_MOTHERSHIP})
+	message(NOTICE, "\n\n\nBuilding Mothership code\n")
+    add_compile_definitions(WW_MOTHERSHIP)
+else()
+	message(NOTICE, "\n\n\nBuilding Sensor code\n")
+endif()
+
+
+
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 
 string(REGEX REPLACE ".*/\(.*\)" "\\1" CURDIR ${CMAKE_CURRENT_SOURCE_DIR})
