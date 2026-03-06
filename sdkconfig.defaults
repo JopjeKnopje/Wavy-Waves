@@ -1,3 +1,5 @@
 # Enable protocomm security version 1 for ESP-NOW security
 CONFIG_ESP_PROTOCOMM_SUPPORT_SECURITY_VERSION_1=y
+CONFIG_IDF_TOOLCHAIN="clang"
+CONFIG_IDF_TOOLCHAIN_CLANG=y
 
