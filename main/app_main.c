@@ -1,9 +1,10 @@
 #include "freertos/FreeRTOS.h"
+#include "esp_wifi_types_generic.h"
 #include "freertos/task.h"
 
 #include "esp_log.h"
 #include "esp_wifi.h"
-#include "lwip/sockets.h"
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/unistd.h>
@@ -23,6 +24,9 @@
 #define UART_PORT_NUM  0
 #define UART_TX_IO     UART_PIN_NO_CHANGE
 #define UART_RX_IO     UART_PIN_NO_CHANGE
+
+
+static const uint8_t MOTHERSHIP_MAC[6] = {0x7F, 0x9E, 0xBD, 0x39, 0x7A, 0xD8};
 
 static const char *TAG = "app_main";
 
@@ -93,7 +97,7 @@ static void app_wifi_init()
     ESP_ERROR_CHECK(esp_wifi_start());
 }
 
-static esp_err_t app_uart_write_handle(uint8_t *src_addr, void *data, size_t size, wifi_pkt_rx_ctrl_t *rx_ctrl)
+static esp_err_t receive_handle(uint8_t *src_addr, void *data, size_t size, wifi_pkt_rx_ctrl_t *rx_ctrl)
 {
     ESP_PARAM_CHECK(src_addr);
     ESP_PARAM_CHECK(data);
@@ -111,10 +115,9 @@ static esp_err_t app_uart_write_handle(uint8_t *src_addr, void *data, size_t siz
 void send_message()
 {
     uint32_t count = 0;
+	const size_t size = sizeof(uint32_t);
 
     esp_err_t ret = ESP_OK;
-    size_t size = 0;
-    char data[ESPNOW_DATA_LEN];
 
     espnow_frame_head_t frame_head = {
         .retransmit_count = CONFIG_RETRY_NUM,
@@ -123,49 +126,41 @@ void send_message()
 
     while (1)
     {
-        snprintf(data, ESPNOW_DATA_LEN, "test data: [%u]", count);
-        size = strlen(data);
-        ret = espnow_send(ESPNOW_DATA_TYPE_DATA, ESPNOW_ADDR_BROADCAST, data, size, &frame_head, portMAX_DELAY);
+        ret = espnow_send(ESPNOW_DATA_TYPE_DATA, MOTHERSHIP_MAC, &count, size, &frame_head, portMAX_DELAY);
         if (ret != ESP_OK)
             ESP_LOGE(TAG, "<%s> espnow_send", esp_err_to_name(ret));
 
-        ESP_LOGI(TAG, "espnow_send, count: %" PRIu32 ", size: %u, data: %s", count++, size, data);
-        memset(data, 0, ESPNOW_DATA_LEN);
+        ESP_LOGI(TAG, "espnow_send, size: %u, data: %u", size, count);
+		count++;
 
         vTaskDelay(1500 / portTICK_PERIOD_MS);
     }
     vTaskDelete(NULL);
 }
 
-typedef struct
-{
-    const char *text;
-    const unsigned int time_ms;
-} t_params;
-
-void test(void *param)
-{
-    t_params cfg = *(t_params *)param;
-    while (1)
-    {
-        printf("test123 %s\n", cfg.text);
-        fflush(stdout);
-        vTaskDelay(cfg.time_ms / portTICK_PERIOD_MS);
-    }
-    vTaskDelete(NULL);
-}
 
 void app_main()
 {
+	// TODO: Add Banner telling bteween sensor/mothership it is
     espnow_storage_init();
 
     app_uart_initialize();
     app_wifi_init();
 
-    xTaskCreate(send_message, "send_message", 4 * 1024, NULL, tskIDLE_PRIORITY + 1, NULL);
-
     espnow_config_t espnow_config = ESPNOW_INIT_CONFIG_DEFAULT();
     espnow_init(&espnow_config);
 
-    espnow_set_config_for_data_type(ESPNOW_DATA_TYPE_DATA, true, app_uart_write_handle);
+    // Get rid of broadcast peer, this is set by default in `espnow_init`.
+    espnow_del_peer(ESPNOW_ADDR_BROADCAST);
+#ifndef WW_MOTHERSHIP
+    espnow_add_peer(MOTHERSHIP_MAC, NULL);
+#endif
+
+
+    espnow_set_config_for_data_type(ESPNOW_DATA_TYPE_DATA, true, receive_handle);
+
+#ifndef WW_MOTHERSHIP
+    xTaskCreate(send_message, "send_message", 4 * 1024, NULL, tskIDLE_PRIORITY + 1, NULL);
+#endif 
+
 }
