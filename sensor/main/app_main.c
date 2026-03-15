@@ -9,6 +9,8 @@
 #include <string.h>
 #include <sys/unistd.h>
 
+#include "ww_data.h"
+
 #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(4, 4, 0)
 #include "esp_mac.h"
 #endif
@@ -24,8 +26,6 @@
 #define UART_PORT_NUM  0
 #define UART_TX_IO     UART_PIN_NO_CHANGE
 #define UART_RX_IO     UART_PIN_NO_CHANGE
-
-static const uint8_t MOTHERSHIP_MAC[6] = {0x7F, 0x9E, 0xBD, 0x39, 0x7A, 0xD8};
 
 static const char *TAG = "app_main";
 
