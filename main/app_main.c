@@ -1,5 +1,5 @@
-#include "freertos/FreeRTOS.h"
 #include "esp_wifi_types_generic.h"
+#include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
 #include "esp_log.h"
@@ -24,7 +24,6 @@
 #define UART_PORT_NUM  0
 #define UART_TX_IO     UART_PIN_NO_CHANGE
 #define UART_RX_IO     UART_PIN_NO_CHANGE
-
 
 static const uint8_t MOTHERSHIP_MAC[6] = {0x7F, 0x9E, 0xBD, 0x39, 0x7A, 0xD8};
 
@@ -115,13 +114,13 @@ static esp_err_t receive_handle(uint8_t *src_addr, void *data, size_t size, wifi
 void send_message()
 {
     uint32_t count = 0;
-	const size_t size = sizeof(uint32_t);
+    const size_t size = sizeof(uint32_t);
 
     esp_err_t ret = ESP_OK;
 
     espnow_frame_head_t frame_head = {
         .retransmit_count = CONFIG_RETRY_NUM,
-        .broadcast = true,
+        .broadcast = false,
     };
 
     while (1)
@@ -131,17 +130,16 @@ void send_message()
             ESP_LOGE(TAG, "<%s> espnow_send", esp_err_to_name(ret));
 
         ESP_LOGI(TAG, "espnow_send, size: %u, data: %u", size, count);
-		count++;
+        count++;
 
         vTaskDelay(1500 / portTICK_PERIOD_MS);
     }
     vTaskDelete(NULL);
 }
 
-
 void app_main()
 {
-	// TODO: Add Banner telling bteween sensor/mothership it is
+    // TODO: Add Banner telling bteween sensor/mothership it is
     espnow_storage_init();
 
     app_uart_initialize();
@@ -156,11 +154,9 @@ void app_main()
     espnow_add_peer(MOTHERSHIP_MAC, NULL);
 #endif
 
-
     espnow_set_config_for_data_type(ESPNOW_DATA_TYPE_DATA, true, receive_handle);
 
 #ifndef WW_MOTHERSHIP
     xTaskCreate(send_message, "send_message", 4 * 1024, NULL, tskIDLE_PRIORITY + 1, NULL);
-#endif 
-
+#endif
 }
