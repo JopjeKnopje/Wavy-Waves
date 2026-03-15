@@ -45,8 +45,7 @@ void send_message()
     espnow_frame_head_t frame_head = {
         .retransmit_count = CONFIG_RETRY_NUM,
         .broadcast = false,
-		// TODO: when enabling this it fails
-		.ack = true,
+        .ack = true,
     };
 
     while (1)
@@ -54,7 +53,6 @@ void send_message()
         ret = espnow_send(ESPNOW_DATA_TYPE_DATA, MOTHERSHIP_MAC, &count, size, &frame_head, portMAX_DELAY);
         if (ret != ESP_OK)
             ESP_LOGE(TAG, "<%s> espnow_send", esp_err_to_name(ret));
-
 
         ESP_LOGI(TAG, "espnow_send, size: %u, data: %u", size, count);
         count++;
