@@ -19,69 +19,7 @@
 #include "espnow_storage.h"
 #include "espnow_utils.h"
 
-#include "driver/uart.h"
-
-// You can modify these according to your boards.
-#define UART_BAUD_RATE 115200
-#define UART_PORT_NUM  0
-#define UART_TX_IO     UART_PIN_NO_CHANGE
-#define UART_RX_IO     UART_PIN_NO_CHANGE
-
 static const char *TAG = "app_main";
-
-static void app_uart_read_task(void *arg)
-{
-    esp_err_t ret = ESP_OK;
-    uint32_t count = 0;
-    size_t size = 0;
-    uint8_t *data = ESP_CALLOC(1, ESPNOW_DATA_LEN);
-
-    ESP_LOGI(TAG, "Uart read handle task is running");
-
-    espnow_frame_head_t frame_head = {
-        .retransmit_count = CONFIG_RETRY_NUM,
-        .broadcast = true,
-    };
-
-    for (;;)
-    {
-        size = uart_read_bytes(UART_PORT_NUM, data, ESPNOW_DATA_LEN, pdMS_TO_TICKS(10));
-        ESP_ERROR_CONTINUE(size <= 0, "");
-
-        ret = espnow_send(ESPNOW_DATA_TYPE_DATA, ESPNOW_ADDR_BROADCAST, data, size, &frame_head, portMAX_DELAY);
-        ESP_ERROR_CONTINUE(ret != ESP_OK, "<%s> espnow_send", esp_err_to_name(ret));
-
-        ESP_LOGI(TAG, "espnow_send, count: %" PRIu32 ", size: %u, data: %s", count++, size, data);
-        memset(data, 0, ESPNOW_DATA_LEN);
-    }
-
-    ESP_LOGI(TAG, "Uart handle task is exit");
-
-    ESP_FREE(data);
-    vTaskDelete(NULL);
-}
-
-static void app_uart_initialize()
-{
-    uart_config_t uart_config = {
-        .baud_rate = UART_BAUD_RATE,
-        .data_bits = UART_DATA_8_BITS,
-        .parity = UART_PARITY_DISABLE,
-        .stop_bits = UART_STOP_BITS_1,
-        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
-#if SOC_UART_SUPPORT_REF_TICK
-        .source_clk = UART_SCLK_REF_TICK,
-#elif SOC_UART_SUPPORT_XTAL_CLK
-        .source_clk = UART_SCLK_XTAL,
-#endif
-    };
-
-    ESP_ERROR_CHECK(uart_param_config(UART_PORT_NUM, &uart_config));
-    ESP_ERROR_CHECK(uart_set_pin(UART_PORT_NUM, UART_TX_IO, UART_RX_IO, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
-    ESP_ERROR_CHECK(uart_driver_install(UART_PORT_NUM, 8 * ESPNOW_DATA_LEN, 8 * ESPNOW_DATA_LEN, 0, NULL, 0));
-
-    // xTaskCreate(app_uart_read_task, "app_uart_read_task", 4 * 1024, NULL, tskIDLE_PRIORITY + 1, NULL);
-}
 
 static void app_wifi_init()
 {
@@ -94,21 +32,6 @@ static void app_wifi_init()
     ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_RAM));
     ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
     ESP_ERROR_CHECK(esp_wifi_start());
-}
-
-static esp_err_t receive_handle(uint8_t *src_addr, void *data, size_t size, wifi_pkt_rx_ctrl_t *rx_ctrl)
-{
-    ESP_PARAM_CHECK(src_addr);
-    ESP_PARAM_CHECK(data);
-    ESP_PARAM_CHECK(size);
-    ESP_PARAM_CHECK(rx_ctrl);
-
-    static uint32_t count = 0;
-
-    ESP_LOGI(TAG, "espnow_recv, <%" PRIu32 "> [" MACSTR "][%d][%d][%u]: %.*s", count++, MAC2STR(src_addr),
-             rx_ctrl->channel, rx_ctrl->rssi, size, size, (char *)data);
-
-    return ESP_OK;
 }
 
 void send_message()
@@ -137,12 +60,24 @@ void send_message()
     vTaskDelete(NULL);
 }
 
-void app_main()
+static esp_err_t receive_handle(uint8_t *src_addr, void *data, size_t size, wifi_pkt_rx_ctrl_t *rx_ctrl)
 {
-    // TODO: Add Banner telling bteween sensor/mothership it is
-    espnow_storage_init();
+    ESP_PARAM_CHECK(src_addr);
+    ESP_PARAM_CHECK(data);
+    ESP_PARAM_CHECK(size);
+    ESP_PARAM_CHECK(rx_ctrl);
 
-    app_uart_initialize();
+    static uint32_t count = 0;
+
+    ESP_LOGI(TAG, "espnow_recv, <%" PRIu32 "> [" MACSTR "][%d][%d][%u]: %u", count++, MAC2STR(src_addr),
+             rx_ctrl->channel, rx_ctrl->rssi, size, size, (uint32_t)data);
+
+    return ESP_OK;
+}
+
+void init_comms()
+{
+    espnow_storage_init();
     app_wifi_init();
 
     espnow_config_t espnow_config = ESPNOW_INIT_CONFIG_DEFAULT();
@@ -150,13 +85,13 @@ void app_main()
 
     // Get rid of broadcast peer, this is set by default in `espnow_init`.
     espnow_del_peer(ESPNOW_ADDR_BROADCAST);
-#ifndef WW_MOTHERSHIP
     espnow_add_peer(MOTHERSHIP_MAC, NULL);
-#endif
+}
+
+void app_main()
+{
+    init_comms();
 
     espnow_set_config_for_data_type(ESPNOW_DATA_TYPE_DATA, true, receive_handle);
-
-#ifndef WW_MOTHERSHIP
     xTaskCreate(send_message, "send_message", 4 * 1024, NULL, tskIDLE_PRIORITY + 1, NULL);
-#endif
 }
