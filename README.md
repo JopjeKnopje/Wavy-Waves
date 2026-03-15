@@ -14,6 +14,8 @@ BMP280 sensor
 DS3231 rtc module
 ![DS3231 rtc module](https://electropeak.com/learn/wp-content/uploads/2021/09/DS3231-1.jpg)
 
+TODO: UPDATE README
+
 # Building the firmware
 
 The code checks whether its building for the Senor board or the so called Mothership™
