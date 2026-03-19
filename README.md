@@ -16,6 +16,9 @@ DS3231 rtc module
 
 TODO: UPDATE README
 
+## Sensors and Boards
+- https://www.tinytronics.nl/en/sensors/air/pressure/bmp280-digital-barometer-pressure-sensor-module
+
 # Building the firmware
 
 The code checks whether its building for the Senor board or the so called Mothership™
