@@ -17,7 +17,7 @@
 #include "espnow_storage.h"
 #include "espnow_utils.h"
 
-static const char *TAG = "app_main";
+static const char *TAG = "mothership";
 
 static void app_wifi_init()
 {
