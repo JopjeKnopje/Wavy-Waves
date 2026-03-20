@@ -39,6 +39,8 @@ static bmp280_t sensor;
 
 #define READ_SENSOR_TASKDELAY (50)
 
+static TimerHandle_t timer_handle;
+
 static void app_wifi_init()
 {
     esp_event_loop_create_default();
@@ -177,6 +179,16 @@ void data_ready_cb(float x)
     }
 }
 
+static SemaphoreHandle_t mutex;
+
+
+void release_mutex()
+{
+	xSemaphoreGive(mutex);
+	ESP_LOGE("release_mutex", "mutex given");
+
+}
+
 void app_main()
 {
     queue_sensor = xQueueCreate(QUEUE_PRESSURE_LEN, sizeof(uint32_t));
@@ -185,9 +197,35 @@ void app_main()
         ESP_LOGE(TAG, "<%s> failed creating queue");
     }
 
-    init_comms();
-    init_sensor();
+	vTaskDelay(1000 / portTICK_PERIOD_MS);
 
-    xTaskCreatePinnedToCore(read_sensor, "read_sensor", 4 * 1024, data_ready_cb, tskIDLE_PRIORITY + 1, NULL, 0);
-    xTaskCreatePinnedToCore(send_message, "send_message", 4 * 1024, NULL, tskIDLE_PRIORITY + 1, &th_send_message, 1);
+	// mutex = xSemaphoreCreateMutex();
+	//
+	// xSemaphoreTake(mutex, 0);
+	// ESP_LOGE(TAG, "mutex taken");
+	//
+	//    timer_handle = xTimerCreate("release_mutex_timer", pdMS_TO_TICKS(1000), pdFALSE, NULL, release_mutex);
+	// xTimerStart(timer_handle, 0);
+	// ESP_LOGI(TAG, "Timer created");
+	//
+	// // block until mutex is released
+	// while (1)
+	// {
+	// 	if (xSemaphoreTake(mutex, 0) == pdTRUE)
+	// 	{
+	//
+	// 		xSemaphoreGive(mutex);
+	// 		xTimerStop(timer_handle, portMAX_DELAY);
+	// 		xTimerDelete(timer_handle, portMAX_DELAY);
+	// 		ESP_LOGE(TAG, "mutex given");
+	//
+
+			init_comms();
+			init_sensor();
+
+			xTaskCreatePinnedToCore(read_sensor, "read_sensor", 4 * 1024, data_ready_cb, tskIDLE_PRIORITY + 1, NULL, 0);
+			xTaskCreatePinnedToCore(send_message, "send_message", 4 * 1024, NULL, tskIDLE_PRIORITY + 1, &th_send_message, 1);
+	// 	}
+	// }
+
 }
