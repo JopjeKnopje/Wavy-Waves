@@ -92,10 +92,24 @@ static esp_err_t receive_handle(uint8_t *src_addr, void *data, size_t size, wifi
     // ESP_LOGI(TAG, "espnow_recv, <%" PRIu32 "> [" MACSTR "][%d][%d][%u]: %u", count++, MAC2STR(src_addr), rx_ctrl->channel, rx_ctrl->rssi, size,
              // value);
 
+	static uint32_t dev1 = 0;
+	static uint32_t dev2 = 0;
+	static const espnow_addr_t DEV_1_MAC = {0x7c, 0x9e, 0xbd, 0xf9, 0xd0, 0x58};
+
+		
+	if (memcmp(DEV_1_MAC, src_addr, 6))
+	{
+		dev1 = value;
+	}
+	else {
+		dev2 = value;
+	}
+
+	printf("%lu %lu\n", dev1, dev2);
+
 	// HAHAH WTF
 	// TODO: Implement some kind of DSP thingy here where it actually takes the average.
 	const uint32_t center = 2048;
-	printf("%lu\n", value);
 	// 
 	uint16_t dac_value = ((value - 26000000) / 100 + center);
 
