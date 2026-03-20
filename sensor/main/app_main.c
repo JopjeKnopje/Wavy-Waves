@@ -98,8 +98,8 @@ static esp_err_t receive_handle(uint8_t *src_addr, void *data, size_t size, wifi
 
     static uint32_t count = 0;
 
-    ESP_LOGI(TAG, "espnow_recv, <%" PRIu32 "> [" MACSTR "][%d][%d][%u]: %u", count++, MAC2STR(src_addr), rx_ctrl->channel, rx_ctrl->rssi, size, size,
-             (uint32_t)data);
+    ESP_LOGI(TAG, "espnow_recv, <%" PRIu32 "> [" MACSTR "][%d][%d][%u]: %f", count++, MAC2STR(src_addr), rx_ctrl->channel, rx_ctrl->rssi, size, size,
+             *(uint32_t *)data);
 
     return ESP_OK;
 }
@@ -133,26 +133,26 @@ bmp280_t init_sensor()
     return sensor;
 }
 
-typedef void(t_data_ready_cb)(uint32_t data);
+typedef void(t_data_ready_cb)(float data);
 
 void read_sensor(void *data)
 {
     t_data_ready_cb *const cb = data;
 
-    uint32_t pressure;
-    uint32_t y;
-    int32_t x;
+    float pressure;
+    float y;
+    float x;
 
     while (1)
     {
-
-        if (bmp280_read_fixed(&sensor, &x, &pressure, &y) != ESP_OK)
+		if (bmp280_read_float(&sensor, &x, &pressure, &y) != ESP_OK)
         {
             ESP_LOGE(TAG, "bmp280 read failed");
             continue;
         }
 
-        if (xQueueSend(queue_sensor, &pressure, 10) != pdPASS)
+		uint32_t data = (uint32_t) pressure;
+        if (xQueueSend(queue_sensor, &data, 10) != pdPASS)
         {
             ESP_LOGE(TAG, "failed adding data [%u] to queue", pressure);
         }
@@ -167,10 +167,10 @@ void read_sensor(void *data)
 }
 
 // TODO: Look into nicer way to do typedef for callbacks. (LVGL for example)
-void data_ready_cb(uint32_t x)
+void data_ready_cb(float x)
 {
     const uint32_t queue_size = QUEUE_PRESSURE_LEN - uxQueueSpacesAvailable(queue_sensor);
-    ESP_LOGI(TAG, "queue len %u", queue_size);
+    ESP_LOGI(TAG, "queue len %d", queue_size);
     if (queue_size > 0)
     {
         xTaskNotifyGive(th_send_message);

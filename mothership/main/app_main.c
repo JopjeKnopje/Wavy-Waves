@@ -56,7 +56,7 @@ void dac_init()
     ESP_ERROR_CHECK(mcp4725_get_power_mode(&dev, true, &pm));
     if (pm != MCP4725_PM_NORMAL)
     {
-		ESP_LOGI(TAG, "DAC was sleeping... Wake up Neo!\n");
+		// ESP_LOGI(TAG, "DAC was sleeping... Wake up Neo!\n");
         ESP_ERROR_CHECK(mcp4725_set_power_mode(&dev, true, MCP4725_PM_NORMAL));
         wait_for_eeprom(&dev);
     }
@@ -89,15 +89,17 @@ static esp_err_t receive_handle(uint8_t *src_addr, void *data, size_t size, wifi
     static uint32_t count = 0;
 
 	const uint32_t value = *(uint32_t *)data;
-    ESP_LOGI(TAG, "espnow_recv, <%" PRIu32 "> [" MACSTR "][%d][%d][%u]: %u", count++, MAC2STR(src_addr), rx_ctrl->channel, rx_ctrl->rssi, size,
-             value);
+    // ESP_LOGI(TAG, "espnow_recv, <%" PRIu32 "> [" MACSTR "][%d][%d][%u]: %u", count++, MAC2STR(src_addr), rx_ctrl->channel, rx_ctrl->rssi, size,
+             // value);
 
 	// HAHAH WTF
 	// TODO: Implement some kind of DSP thingy here where it actually takes the average.
 	const uint32_t center = 2048;
-	uint16_t dac_value = ((value / 1000) - 26000 + center);
+	printf("%u\n", value);
+	// 
+	uint16_t dac_value = ((value - 26000000) / 100 + center);
 
-	ESP_LOGI(TAG, "wiritng to DAC %u", dac_value);
+	// ESP_LOGI(TAG, "wiritng to DAC %u", dac_value);
     ESP_ERROR_CHECK(mcp4725_set_raw_output(&dev, dac_value, false));
 
 
