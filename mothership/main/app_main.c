@@ -1,67 +1,66 @@
-#include "esp_wifi_types_generic.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-
-#include "esp_log.h"
-#include "esp_wifi.h"
-#include <stdint.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#include <mcp4725.h>
 #include <stdio.h>
 #include <string.h>
-#include <sys/unistd.h>
 
-#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(4, 4, 0)
-#include "esp_mac.h"
-#endif
+#define VDD 5
 
-#include "espnow.h"
-#include "espnow_storage.h"
-#include "espnow_utils.h"
-
-static const char *TAG = "mothership";
-
-static void app_wifi_init()
+static void wait_for_eeprom(i2c_dev_t *dev)
 {
-    esp_event_loop_create_default();
-
-    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-
-    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
-    ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_RAM));
-    ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
-    ESP_ERROR_CHECK(esp_wifi_start());
+    bool busy;
+    while (true)
+    {
+        ESP_ERROR_CHECK(mcp4725_eeprom_busy(dev, &busy));
+        if (!busy)
+            return;
+        printf("...DAC is busy, waiting...\n");
+        vTaskDelay(1);
+    }
 }
 
-static esp_err_t receive_handle(uint8_t *src_addr, void *data, size_t size, wifi_pkt_rx_ctrl_t *rx_ctrl)
+void task(void *pvParameters)
 {
-    ESP_PARAM_CHECK(src_addr);
-    ESP_PARAM_CHECK(data);
-    ESP_PARAM_CHECK(size);
-    ESP_PARAM_CHECK(rx_ctrl);
+    i2c_dev_t dev;
+    memset(&dev, 0, sizeof(i2c_dev_t));
 
-    static uint32_t count = 0;
+    // Init device descriptor
+    ESP_ERROR_CHECK(mcp4725_init_desc(&dev, MCP4725A0_I2C_ADDR0, 0, CONFIG_I2CDEV_DEFAULT_SDA_PIN, CONFIG_I2CDEV_DEFAULT_SCL_PIN));
 
-    ESP_LOGI(TAG, "espnow_recv, <%" PRIu32 "> [" MACSTR "][%d][%d][%u]: %u", count++, MAC2STR(src_addr), rx_ctrl->channel, rx_ctrl->rssi, size,
-             *(uint32_t *)data);
+    mcp4725_power_mode_t pm;
+    ESP_ERROR_CHECK(mcp4725_get_power_mode(&dev, true, &pm));
+    if (pm != MCP4725_PM_NORMAL)
+    {
+        printf("DAC was sleeping... Wake up Neo!\n");
+        ESP_ERROR_CHECK(mcp4725_set_power_mode(&dev, true, MCP4725_PM_NORMAL));
+        wait_for_eeprom(&dev);
+    }
 
-    return ESP_OK;
-}
+    printf("Set default DAC output value to MAX...\n");
+    ESP_ERROR_CHECK(mcp4725_set_raw_output(&dev, MCP4725_MAX_VALUE, true));
+    wait_for_eeprom(&dev);
 
-void init_comms()
-{
-    espnow_storage_init();
-    app_wifi_init();
+    printf("Now let's generate the sawtooth wave in slow manner\n");
 
-    espnow_config_t espnow_config = ESPNOW_INIT_CONFIG_DEFAULT();
-    espnow_init(&espnow_config);
+    float vout = 0;
+    while (1)
+    {
+        vout += 0.1;
+        if (vout > VDD)
+            vout = 0;
 
-    // Get rid of broadcast peer, this is set by default in `espnow_init`.
-    espnow_del_peer(ESPNOW_ADDR_BROADCAST);
+        // printf("Vout: %.02f\n", vout);
+        ESP_ERROR_CHECK(mcp4725_set_voltage(&dev, VDD, vout, false));
+
+        // It will be very low freq wave
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
 }
 
 void app_main()
 {
-    init_comms();
+    // Init i2cdev library
+    ESP_ERROR_CHECK(i2cdev_init());
 
-    espnow_set_config_for_data_type(ESPNOW_DATA_TYPE_DATA, true, receive_handle);
+    xTaskCreate(task, "test", configMINIMAL_STACK_SIZE * 8, NULL, 5, NULL);
 }

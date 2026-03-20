@@ -9,6 +9,8 @@
 
 #include "esp_log.h"
 #include "esp_wifi.h"
+#include "status_led.h"
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -185,8 +187,12 @@ void app_main()
         ESP_LOGE(TAG, "<%s> failed creating queue");
     }
 
+    led_init();
     init_sensor();
     init_comms();
+    led_set(1);
+    TimerHandle_t led_timer_handle;
+    led_timer_handle = xTimerCreate("led_status_timer", pdMS_TO_TICKS(1000), pdFALSE, NULL, led_post_init);
 
     xTaskCreate(read_sensor, "read_sensor", 2 * 1024, data_ready_cb, tskIDLE_PRIORITY + 2, NULL);
     xTaskCreate(send_message, "send_message", 4 * 1024, NULL, tskIDLE_PRIORITY + 2, &th_send_message);
