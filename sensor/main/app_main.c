@@ -37,7 +37,7 @@ static TaskHandle_t th_send_message;
 
 static bmp280_t sensor;
 
-#define READ_SENSOR_TASKDELAY (1000)
+#define READ_SENSOR_TASKDELAY (100)
 
 static void app_wifi_init()
 {
@@ -185,9 +185,9 @@ void app_main()
         ESP_LOGE(TAG, "<%s> failed creating queue");
     }
 
-    init_sensor();
     init_comms();
+    init_sensor();
 
-    xTaskCreate(read_sensor, "read_sensor", 2 * 1024, data_ready_cb, tskIDLE_PRIORITY + 2, NULL);
-    xTaskCreate(send_message, "send_message", 4 * 1024, NULL, tskIDLE_PRIORITY + 2, &th_send_message);
+    xTaskCreate(read_sensor, "read_sensor", 2 * 1024, data_ready_cb, tskIDLE_PRIORITY + 1, NULL);
+    xTaskCreate(send_message, "send_message", 4 * 1024, NULL, tskIDLE_PRIORITY + 1, &th_send_message);
 }
