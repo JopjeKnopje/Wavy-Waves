@@ -95,7 +95,7 @@ static esp_err_t receive_handle(uint8_t *src_addr, void *data, size_t size, wifi
 	// HAHAH WTF
 	// TODO: Implement some kind of DSP thingy here where it actually takes the average.
 	const uint32_t center = 2048;
-	printf("%u\n", value);
+	printf("%lu\n", value);
 	// 
 	uint16_t dac_value = ((value - 26000000) / 100 + center);
 
