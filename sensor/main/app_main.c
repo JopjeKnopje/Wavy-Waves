@@ -37,7 +37,7 @@ static TaskHandle_t th_send_message;
 
 static bmp280_t sensor;
 
-#define READ_SENSOR_TASKDELAY (100)
+#define READ_SENSOR_TASKDELAY (50)
 
 static void app_wifi_init()
 {
@@ -188,6 +188,6 @@ void app_main()
     init_comms();
     init_sensor();
 
-    xTaskCreate(read_sensor, "read_sensor", 2 * 1024, data_ready_cb, tskIDLE_PRIORITY + 1, NULL);
-    xTaskCreate(send_message, "send_message", 4 * 1024, NULL, tskIDLE_PRIORITY + 1, &th_send_message);
+    xTaskCreatePinnedToCore(read_sensor, "read_sensor", 4 * 1024, data_ready_cb, tskIDLE_PRIORITY + 1, NULL, 0);
+    xTaskCreatePinnedToCore(send_message, "send_message", 4 * 1024, NULL, tskIDLE_PRIORITY + 1, &th_send_message, 1);
 }
