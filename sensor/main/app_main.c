@@ -75,7 +75,7 @@ void send_message()
             uint32_t data;
             if (xQueueReceive(queue_sensor, &data, 10) != pdPASS)
             {
-                ESP_LOGW(TAG, "failed reading from queue. its empty");
+                ESP_LOGW(TAG, "no messages in queue");
                 break;
             }
 
