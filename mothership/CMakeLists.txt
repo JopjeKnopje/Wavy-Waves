@@ -8,12 +8,7 @@ if(NOT DEFINED IDF_TARGET)
     set(IDF_TARGET "esp32")
 endif()
 
-if (DEFINED ENV{WW_MOTHERSHIP})
-	message(NOTICE, "\n\n\nBuilding Mothership code\n")
-    add_compile_definitions(WW_MOTHERSHIP)
-else()
-	message(NOTICE, "\n\n\nBuilding Sensor code\n")
-endif()
+message(NOTICE, "\n\n\nBuilding Mothership code\n")
 
 
 
