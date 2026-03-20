@@ -145,13 +145,13 @@ void read_sensor(void *data)
 
     while (1)
     {
-		if (bmp280_read_float(&sensor, &x, &pressure, &y) != ESP_OK)
+        if (bmp280_read_float(&sensor, &x, &pressure, &y) != ESP_OK)
         {
             ESP_LOGE(TAG, "bmp280 read failed");
             continue;
         }
 
-		uint32_t data = (uint32_t) pressure;
+        uint32_t data = (uint32_t)pressure;
         if (xQueueSend(queue_sensor, &data, 10) != pdPASS)
         {
             ESP_LOGE(TAG, "failed adding data [%u] to queue", pressure);
@@ -185,9 +185,14 @@ void app_main()
         ESP_LOGE(TAG, "<%s> failed creating queue");
     }
 
-    init_comms();
+    vTaskDelay(pdMS_TO_TICKS(3000));
+
     init_sensor();
+    vTaskDelay(pdMS_TO_TICKS(3000));
+    init_comms();
+    vTaskDelay(pdMS_TO_TICKS(3000));
 
     xTaskCreatePinnedToCore(read_sensor, "read_sensor", 4 * 1024, data_ready_cb, tskIDLE_PRIORITY + 1, NULL, 0);
+    vTaskDelay(pdMS_TO_TICKS(3000));
     xTaskCreatePinnedToCore(send_message, "send_message", 4 * 1024, NULL, tskIDLE_PRIORITY + 1, &th_send_message, 1);
 }
