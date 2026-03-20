@@ -28,7 +28,6 @@ static const char *TAG = "mothership";
 
 static i2c_dev_t dev;
 
-
 static void wait_for_eeprom(i2c_dev_t *dev)
 {
     bool busy;
@@ -41,7 +40,6 @@ static void wait_for_eeprom(i2c_dev_t *dev)
         vTaskDelay(1);
     }
 }
-
 
 void dac_init()
 {
@@ -56,7 +54,7 @@ void dac_init()
     ESP_ERROR_CHECK(mcp4725_get_power_mode(&dev, true, &pm));
     if (pm != MCP4725_PM_NORMAL)
     {
-		// ESP_LOGI(TAG, "DAC was sleeping... Wake up Neo!\n");
+        // ESP_LOGI(TAG, "DAC was sleeping... Wake up Neo!\n");
         ESP_ERROR_CHECK(mcp4725_set_power_mode(&dev, true, MCP4725_PM_NORMAL));
         wait_for_eeprom(&dev);
     }
@@ -64,7 +62,6 @@ void dac_init()
     ESP_ERROR_CHECK(mcp4725_set_raw_output(&dev, 0, true));
     wait_for_eeprom(&dev);
 }
-
 
 static void app_wifi_init()
 {
@@ -88,34 +85,34 @@ static esp_err_t receive_handle(uint8_t *src_addr, void *data, size_t size, wifi
 
     static uint32_t count = 0;
 
-	const uint32_t value = *(uint32_t *)data;
+    const uint32_t value = *(uint32_t *)data;
     // ESP_LOGI(TAG, "espnow_recv, <%" PRIu32 "> [" MACSTR "][%d][%d][%u]: %u", count++, MAC2STR(src_addr), rx_ctrl->channel, rx_ctrl->rssi, size,
-             // value);
+    // value);
 
-	static uint32_t dev1 = 0;
-	static uint32_t dev2 = 0;
-	static const espnow_addr_t DEV_1_MAC = {0x7c, 0x9e, 0xbd, 0xf9, 0xd0, 0x58};
+    static uint32_t dev1 = 0;
+    static uint32_t dev2 = 0;
+    static const espnow_addr_t DEV_1_MAC = {0x7c, 0x9e, 0xbd, 0xf9, 0xd0, 0x58};
 
-		
-	if (memcmp(DEV_1_MAC, src_addr, 6))
-	{
-		dev1 = value;
-	}
-	else {
-		dev2 = value;
-	}
+    // `src_addr` equals `DEV_1_MAC`
+    if (!memcmp(DEV_1_MAC, src_addr, 6))
+    {
+        dev1 = value;
+    }
+    else
+    {
+        dev2 = value;
+    }
 
-	printf("%lu %lu\n", dev1, dev2);
+    printf("%u %u\n", dev1, dev2);
 
-	// HAHAH WTF
-	// TODO: Implement some kind of DSP thingy here where it actually takes the average.
-	const uint32_t center = 2048;
-	// 
-	uint16_t dac_value = ((value - 26000000) / 100 + center);
+    // HAHAH WTF
+    // TODO: Implement some kind of DSP thingy here where it actually takes the average.
+    const uint32_t center = 2048;
+    //
+    uint16_t dac_value = ((value - 26000000) / 100 + center);
 
-	// ESP_LOGI(TAG, "wiritng to DAC %u", dac_value);
+    // ESP_LOGI(TAG, "wiritng to DAC %u", dac_value);
     ESP_ERROR_CHECK(mcp4725_set_raw_output(&dev, dac_value, false));
-
 
     return ESP_OK;
 }
@@ -132,10 +129,9 @@ void init_comms()
     espnow_del_peer(ESPNOW_ADDR_BROADCAST);
 }
 
-
 void app_main()
 {
-	dac_init();
+    dac_init();
     init_comms();
 
     espnow_set_config_for_data_type(ESPNOW_DATA_TYPE_DATA, true, receive_handle);
