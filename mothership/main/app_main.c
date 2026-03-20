@@ -41,8 +41,8 @@ static esp_err_t receive_handle(uint8_t *src_addr, void *data, size_t size, wifi
 
     static uint32_t count = 0;
 
-    ESP_LOGI(TAG, "espnow_recv, <%" PRIu32 "> [" MACSTR "][%d][%d][%u]: %u", count++, MAC2STR(src_addr),
-             rx_ctrl->channel, rx_ctrl->rssi, size, *(uint32_t *)data);
+    ESP_LOGI(TAG, "espnow_recv, <%" PRIu32 "> [" MACSTR "][%d][%d][%u]: %u", count++, MAC2STR(src_addr), rx_ctrl->channel, rx_ctrl->rssi, size,
+             *(uint32_t *)data);
 
     return ESP_OK;
 }

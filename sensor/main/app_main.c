@@ -1,4 +1,5 @@
 #include "bmp280.h"
+#include "esp_log_level.h"
 #include "esp_now.h"
 #include "esp_wifi_types_generic.h"
 #include "freertos/FreeRTOS.h"
@@ -15,6 +16,7 @@
 
 #include "i2cdev.h"
 #include "lwip/pbuf.h"
+#include "portmacro.h"
 #include "ww_data.h"
 
 #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(4, 4, 0)
@@ -31,7 +33,11 @@ static QueueHandle_t queue_sensor;
 
 #define QUEUE_PRESSURE_LEN (8)
 
+static TaskHandle_t th_send_message;
+
 static bmp280_t sensor;
+
+#define READ_SENSOR_TASKDELAY (1000)
 
 static void app_wifi_init()
 {
@@ -60,20 +66,25 @@ void send_message()
 
     while (1)
     {
-        uint32_t data;
-        if (xQueueReceive(queue_sensor, &data, 10) != pdPASS)
+
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        ESP_LOGI(TAG, "send_message notified");
+
+        while (1)
         {
-            ESP_LOGW(TAG, "failed reading from queue. its empty");
-            continue;
+            uint32_t data;
+            if (xQueueReceive(queue_sensor, &data, 10) != pdPASS)
+            {
+                ESP_LOGW(TAG, "failed reading from queue. its empty");
+                break;
+            }
+
+            ret = espnow_send(ESPNOW_DATA_TYPE_DATA, MOTHERSHIP_MAC, &data, size, &frame_head, portMAX_DELAY);
+            if (ret != ESP_OK)
+                ESP_LOGE(TAG, "<%s> espnow_send", esp_err_to_name(ret));
+
+            ESP_LOGI(TAG, "espnow_send, size: %u, data: %u", size, data);
         }
-
-        ret = espnow_send(ESPNOW_DATA_TYPE_DATA, MOTHERSHIP_MAC, &data, size, &frame_head, portMAX_DELAY);
-        if (ret != ESP_OK)
-            ESP_LOGE(TAG, "<%s> espnow_send", esp_err_to_name(ret));
-
-        ESP_LOGI(TAG, "espnow_send, size: %u, data: %u", size, data);
-
-        vTaskDelay(pdMS_TO_TICKS(1500));
     }
     vTaskDelete(NULL);
 }
@@ -87,8 +98,8 @@ static esp_err_t receive_handle(uint8_t *src_addr, void *data, size_t size, wifi
 
     static uint32_t count = 0;
 
-    ESP_LOGI(TAG, "espnow_recv, <%" PRIu32 "> [" MACSTR "][%d][%d][%u]: %u", count++, MAC2STR(src_addr),
-             rx_ctrl->channel, rx_ctrl->rssi, size, size, (uint32_t)data);
+    ESP_LOGI(TAG, "espnow_recv, <%" PRIu32 "> [" MACSTR "][%d][%d][%u]: %u", count++, MAC2STR(src_addr), rx_ctrl->channel, rx_ctrl->rssi, size, size,
+             (uint32_t)data);
 
     return ESP_OK;
 }
@@ -116,22 +127,24 @@ bmp280_t init_sensor()
     bmp280_init_default_params(&params);
     memset(&sensor, 0, sizeof(bmp280_t));
 
-    ESP_ERROR_CHECK(bmp280_init_desc(&sensor, BMP280_I2C_ADDRESS_0, 0, CONFIG_I2CDEV_DEFAULT_SDA_PIN,
-                                     CONFIG_I2CDEV_DEFAULT_SCL_PIN));
+    ESP_ERROR_CHECK(bmp280_init_desc(&sensor, BMP280_I2C_ADDRESS_0, 0, CONFIG_I2CDEV_DEFAULT_SDA_PIN, CONFIG_I2CDEV_DEFAULT_SCL_PIN));
     ESP_ERROR_CHECK(bmp280_init(&sensor, &params));
 
     return sensor;
 }
 
-void read_sensor()
+typedef void(t_data_ready_cb)(uint32_t data);
+
+void read_sensor(void *data)
 {
+    t_data_ready_cb *const cb = data;
+
     uint32_t pressure;
     uint32_t y;
     int32_t x;
 
     while (1)
     {
-        vTaskDelay(pdMS_TO_TICKS(500));
 
         if (bmp280_read_fixed(&sensor, &x, &pressure, &y) != ESP_OK)
         {
@@ -139,14 +152,29 @@ void read_sensor()
             continue;
         }
 
-        if (xQueueSend(queue_sensor, &pressure, 10) == errQUEUE_FULL)
+        if (xQueueSend(queue_sensor, &pressure, 10) != pdPASS)
         {
             ESP_LOGE(TAG, "failed adding data [%u] to queue", pressure);
         }
+        else
+        {
+            cb(pressure);
+        }
 
-        // printf("Pressure: %u Pa\n", pressure);
+        vTaskDelay(pdMS_TO_TICKS(READ_SENSOR_TASKDELAY));
     }
     vTaskDelete(NULL);
+}
+
+// TODO: Look into nicer way to do typedef for callbacks. (LVGL for example)
+void data_ready_cb(uint32_t x)
+{
+    const uint32_t queue_size = QUEUE_PRESSURE_LEN - uxQueueSpacesAvailable(queue_sensor);
+    ESP_LOGI(TAG, "queue len %u", queue_size);
+    if (queue_size > 0)
+    {
+        xTaskNotifyGive(th_send_message);
+    }
 }
 
 void app_main()
@@ -160,6 +188,6 @@ void app_main()
     init_sensor();
     init_comms();
 
-    xTaskCreate(read_sensor, "read_sensor", 2 * 1024, NULL, tskIDLE_PRIORITY + 1, NULL);
-    xTaskCreate(send_message, "send_message", 4 * 1024, NULL, tskIDLE_PRIORITY + 1, NULL);
+    xTaskCreate(read_sensor, "read_sensor", 2 * 1024, data_ready_cb, tskIDLE_PRIORITY + 2, NULL);
+    xTaskCreate(send_message, "send_message", 4 * 1024, NULL, tskIDLE_PRIORITY + 2, &th_send_message);
 }
