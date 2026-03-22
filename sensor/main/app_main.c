@@ -22,14 +22,18 @@
 #include "i2cdev.h"
 #include "lwip/pbuf.h"
 #include "portmacro.h"
+#include "soc/gpio_num.h"
 #include "ww_data.h"
 
 #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(4, 4, 0)
 #include "esp_mac.h"
 #endif
 
-#define QUEUE_PRESSURE_LEN      (8)
-#define READ_SENSOR_INTERVAL_HZ (50)
+#define QUEUE_PRESSURE_LEN (8)
+
+#define READ_SENSOR_INTERVAL_HZ (80)
+#define TIMER_RES_FREQ_HZ       (16 * 1000)
+#define TIMER_ALARM_COUNT       (TIMER_RES_FREQ_HZ / READ_SENSOR_INTERVAL_HZ)
 
 #include "espnow.h"
 #include "espnow_storage.h"
@@ -86,7 +90,7 @@ void send_message()
             continue;
         }
 
-        ESP_LOGI(TAG, "espnow_send, size: %u, data: %u", size, data);
+        // ESP_LOGI(TAG, "espnow_send, size: %u, data: %u", size, data);
     }
     vTaskDelete(NULL);
 }
@@ -127,6 +131,7 @@ bmp280_t init_sensor()
 
     bmp280_params_t params;
     bmp280_init_default_params(&params);
+    params.standby = BMP280_STANDBY_05;
     memset(&sensor, 0, sizeof(bmp280_t));
 
     ESP_ERROR_CHECK(bmp280_init_desc(&sensor, BMP280_I2C_ADDRESS_0, 0, CONFIG_I2CDEV_DEFAULT_SDA_PIN, CONFIG_I2CDEV_DEFAULT_SCL_PIN));
@@ -179,23 +184,35 @@ bool IRAM_ATTR timer_callback(gptimer_handle_t timer, const gptimer_alarm_event_
     return false;
 }
 
-static gptimer_handle_t gp_timer = NULL;
-static gptimer_config_t gp_timer_config = {
-    .clk_src = GPTIMER_CLK_SRC_DEFAULT,
-    .direction = GPTIMER_COUNT_UP,
-    // set the pre-scaler.
-    .resolution_hz = 2 * 1000 // 2 Khz
-};
+void init_timers(uint32_t freq)
+{
 
-static gptimer_alarm_config_t alarm_config = {
-    .reload_count = 0,
-    .alarm_count = 1,
-    .flags.auto_reload_on_alarm = true,
-};
+    static gptimer_handle_t gp_timer = NULL;
+    static gptimer_config_t gp_timer_config = {
+        .clk_src = GPTIMER_CLK_SRC_DEFAULT,
+        .direction = GPTIMER_COUNT_UP,
+        // frequency in which the timer should trigger.
+        .resolution_hz = TIMER_RES_FREQ_HZ,
+    };
 
-gptimer_event_callbacks_t cbs = {
-    .on_alarm = timer_callback,
-};
+    static gptimer_alarm_config_t alarm_config = {
+        .reload_count = 0,
+        // amount of counts required before the alarm triggers.
+        .alarm_count = TIMER_ALARM_COUNT,
+        .flags.auto_reload_on_alarm = true,
+    };
+
+    gptimer_event_callbacks_t cbs = {
+        .on_alarm = timer_callback,
+    };
+
+    ESP_ERROR_CHECK(gptimer_new_timer(&gp_timer_config, &gp_timer));
+
+    ESP_ERROR_CHECK(gptimer_register_event_callbacks(gp_timer, &cbs, NULL));
+    ESP_ERROR_CHECK(gptimer_set_alarm_action(gp_timer, &alarm_config));
+    ESP_ERROR_CHECK(gptimer_enable(gp_timer));
+    ESP_ERROR_CHECK(gptimer_start(gp_timer));
+}
 
 void app_main()
 {
@@ -206,16 +223,12 @@ void app_main()
     }
 
     gpio_set_direction(PIN_PULSE, GPIO_MODE_OUTPUT);
-    ESP_ERROR_CHECK(gptimer_new_timer(&gp_timer_config, &gp_timer));
-
-    ESP_ERROR_CHECK(gptimer_register_event_callbacks(gp_timer, &cbs, NULL));
-    ESP_ERROR_CHECK(gptimer_set_alarm_action(gp_timer, &alarm_config));
-    ESP_ERROR_CHECK(gptimer_enable(gp_timer));
 
     init_comms();
     init_sensor();
 
-    ESP_ERROR_CHECK(gptimer_start(gp_timer));
+    init_timers(READ_SENSOR_INTERVAL_HZ);
+
     xTaskCreatePinnedToCore(read_sensor, "read_sensor", 4 * 1024, NULL, configMAX_PRIORITIES - 1, &th_read_sensor, 0);
     xTaskCreatePinnedToCore(send_message, "send_message", 4 * 1024, NULL, tskIDLE_PRIORITY + 1, NULL, 1);
 }
