@@ -1,39 +1,52 @@
 <div align=center>
 
 # Wavy Waves
+ESP-NOW Sensor network for capturing water wave levels, using a BMP280 pressure sensor enclosed in a pipe. This data gets send to the ["Mothership"](HARDWARE.md), which uses a MCP4725 to generate a [Control Voltage](https://en.wikipedia.org/wiki/CV/gate#CV)
 
 <br />
 </div>
 
-# Building the firmware
+## About
+This repo contains the code for both the ["Mothership"](mothership) and the ["Sensor"](sensor), both are built using [ESPIDF v5.5](https://docs.espressif.com/projects/esp-idf/en/v5.5.3/esp32/get-started/index.html) 
 
-The code checks whether its building for the Senor board or the so called Mothership™
-In order to build the project for the Mothership™, just set the `WW_MOTHERSHIP` environment variable like shown below.
+For the hardware take a look at [HARDWARE.md](HARDWARE.md)
 
-> [!warning]  
-> Keep in mind that when changing `WW_MOTHERSHIP` between builds you have to run `idf.py clean` CMake doesn't pick up on environment changes
 
+## Building the firmware
+Move into the directory of the device you want to build for, either.
 ```bash
-WW_MOTHERSHIP="" idf.py build
+cd sensor
+# or
+cd mothership
+```
+Setup the environment variables, and get ESP-IDF in your PATH.
+```bash
+source ../set-env.sh
+```
+### Building / Flashing
+Build the actual firmware
+```
+idf.py build
 ```
 
-
-Flash the board without any montioring.
-```bash
+Flash the firmware
+```
 idf.py flash
+# or with a specific port
+idf.py flash -p /dev/XXX
 ```
 
-Flash and monitor the output with a port specified.
-```bash
-idf.py flash -b 921600 -p /dev/ttyUSB0 monitor
-```
+> [!TIP]
+>  You can combine the commands above comands
+>```bash
+> idf.py -p /dev/ttyUSB0 build flash monitor
+>```
 
-# Dev setup
-## espidf 
-> [!note]  
-> This is needed for actually building the firmware, the other steps are just developer tools.
 
-Follow the steps from espressifs [instructions](https://docs.espressif.com/projects/esp-idf/en/stable/esp32/get-started/linux-macos-setup.html)
+## Dev Toolchain
+This bit will go over the additional tooling used in this project.
+### ESPIDF 
+Follow the steps from espressifs [instructions](https://docs.espressif.com/projects/esp-idf/en/v5.5.3/esp32/get-started/index.html)
 
 I've created an alias in my `.zshrc` file to activate the espidf environment.
 ```zsh
@@ -41,7 +54,7 @@ alias get_idf='. $HOME/esp/esp-idf/export.sh'
 ```
 
 
-## LSP
+### LSP
 Install the espressifs [`esp-clangd`](https://github.com/espressif/llvm-project) version.
 ```bash
 idf_tools.py install esp-clang
@@ -49,17 +62,17 @@ idf_tools.py install esp-clang
 
 We use clang instead of gcc to compile esp-idf project, for some reason this generates the correct `compile_commands.json`.
 
-### Neo-vim plugin
+#### Neo-vim plugin
 https://github.com/Aietes/esp32.nvim
 
-### compile_commands.json
+#### compile_commands.json
 If `compile_commands.json` lives in a build directory, you should symlink it to the root of your source tree.
 ```
 ln -s build/compile_commands.json .
 ```
 
 
-## Formatting tools
+#### Formatting tools
 I have some pre-commits hooks setup using [prek](https://github.com/j178/prek?tab=readme-ov-file#installation) which runs [clang-formatter]().
 You can install clang-format with
 ```bash
@@ -83,9 +96,6 @@ prek will run automatically on every commit you make, but you can run it manuall
 prek run --all-files
 ```
 
-
-### Running tests locally
-To set this up have a look at [this](https://docs.espressif.com/projects/esp-idf/en/stable/esp32/contribute/esp-idf-tests-with-pytest.html#id1)
 
 
 ## Serial monitoring
