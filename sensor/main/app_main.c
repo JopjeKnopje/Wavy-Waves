@@ -1,4 +1,8 @@
+#include "FreeRTOSConfig.h"
 #include "bmp280.h"
+#include "driver/gpio.h"
+#include "driver/gptimer.h"
+#include "driver/gptimer_types.h"
 #include "esp_log_level.h"
 #include "esp_now.h"
 #include "esp_wifi_types_generic.h"
@@ -12,6 +16,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/types.h>
 #include <sys/unistd.h>
 
 #include "i2cdev.h"
@@ -23,6 +28,9 @@
 #include "esp_mac.h"
 #endif
 
+#define QUEUE_PRESSURE_LEN      (8)
+#define READ_SENSOR_INTERVAL_HZ (50)
+
 #include "espnow.h"
 #include "espnow_storage.h"
 #include "espnow_utils.h"
@@ -31,13 +39,11 @@ static const char *TAG = "sensor";
 
 static QueueHandle_t queue_sensor;
 
-#define QUEUE_PRESSURE_LEN (8)
-
-static TaskHandle_t th_send_message;
+static TaskHandle_t th_read_sensor;
 
 static bmp280_t sensor;
 
-#define READ_SENSOR_TASKDELAY (50)
+#define PIN_PULSE 33
 
 static void app_wifi_init()
 {
@@ -66,25 +72,21 @@ void send_message()
 
     while (1)
     {
-
-        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-        ESP_LOGI(TAG, "send_message notified");
-
-        while (1)
+        uint32_t data;
+        if (xQueueReceive(queue_sensor, &data, 10) != pdPASS)
         {
-            uint32_t data;
-            if (xQueueReceive(queue_sensor, &data, 10) != pdPASS)
-            {
-                ESP_LOGW(TAG, "no messages in queue");
-                break;
-            }
-
-            ret = espnow_send(ESPNOW_DATA_TYPE_DATA, MOTHERSHIP_MAC, &data, size, &frame_head, portMAX_DELAY);
-            if (ret != ESP_OK)
-                ESP_LOGE(TAG, "<%s> espnow_send", esp_err_to_name(ret));
-
-            ESP_LOGI(TAG, "espnow_send, size: %u, data: %u", size, data);
+            ESP_LOGW(TAG, "no messages in queue");
+            continue;
         }
+
+        ret = espnow_send(ESPNOW_DATA_TYPE_DATA, MOTHERSHIP_MAC, &data, size, &frame_head, portMAX_DELAY);
+        if (ret != ESP_OK)
+        {
+            ESP_LOGE(TAG, "<%s> espnow_send", esp_err_to_name(ret));
+            continue;
+        }
+
+        ESP_LOGI(TAG, "espnow_send, size: %u, data: %u", size, data);
     }
     vTaskDelete(NULL);
 }
@@ -137,45 +139,63 @@ typedef void(t_data_ready_cb)(float data);
 
 void read_sensor(void *data)
 {
-    t_data_ready_cb *const cb = data;
-
     float pressure;
     float y;
     float x;
+    uint8_t state = 0;
 
     while (1)
     {
-		if (bmp280_read_float(&sensor, &x, &pressure, &y) != ESP_OK)
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        state = !state;
+        gpio_set_level(PIN_PULSE, state);
+        if (bmp280_read_float(&sensor, &x, &pressure, &y) != ESP_OK)
         {
             ESP_LOGE(TAG, "bmp280 read failed");
             continue;
         }
 
-		uint32_t data = (uint32_t) pressure;
-        if (xQueueSend(queue_sensor, &data, 10) != pdPASS)
+        uint32_t data = (uint32_t)pressure;
+        // TODO: use `ESP_ERROR_CHECK`?
+        // Don't wait for the queue to be avaliable, if we do wait for any amount of time here. It will throw off `READ_SENSOR_INTERVAL_HZ`
+        if (xQueueSend(queue_sensor, &data, 0) != pdPASS)
         {
-            ESP_LOGE(TAG, "failed adding data [%u] to queue", pressure);
+            // ESP_LOGE(TAG, "failed adding data [%u] to queue", pressure);
         }
-        else
-        {
-            cb(pressure);
-        }
-
-        vTaskDelay(pdMS_TO_TICKS(READ_SENSOR_TASKDELAY));
     }
     vTaskDelete(NULL);
 }
 
-// TODO: Look into nicer way to do typedef for callbacks. (LVGL for example)
-void data_ready_cb(float x)
+// TODO: shoudl this be IRAM_ATTR?
+bool IRAM_ATTR timer_callback(gptimer_handle_t timer, const gptimer_alarm_event_data_t *edata, void *user_ctx)
 {
-    const uint32_t queue_size = QUEUE_PRESSURE_LEN - uxQueueSpacesAvailable(queue_sensor);
-    ESP_LOGI(TAG, "queue len %d", queue_size);
-    if (queue_size > 0)
-    {
-        xTaskNotifyGive(th_send_message);
-    }
+    // TODO: should this be static?
+    static BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+
+    vTaskNotifyGiveFromISR(th_read_sensor, &xHigherPriorityTaskWoken);
+
+    portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+
+    return false;
 }
+
+static gptimer_handle_t gp_timer = NULL;
+static gptimer_config_t gp_timer_config = {
+    .clk_src = GPTIMER_CLK_SRC_DEFAULT,
+    .direction = GPTIMER_COUNT_UP,
+    // set the pre-scaler.
+    .resolution_hz = 2 * 1000 // 2 Khz
+};
+
+static gptimer_alarm_config_t alarm_config = {
+    .reload_count = 0,
+    .alarm_count = 1,
+    .flags.auto_reload_on_alarm = true,
+};
+
+gptimer_event_callbacks_t cbs = {
+    .on_alarm = timer_callback,
+};
 
 void app_main()
 {
@@ -185,9 +205,17 @@ void app_main()
         ESP_LOGE(TAG, "<%s> failed creating queue");
     }
 
+    gpio_set_direction(PIN_PULSE, GPIO_MODE_OUTPUT);
+    ESP_ERROR_CHECK(gptimer_new_timer(&gp_timer_config, &gp_timer));
+
+    ESP_ERROR_CHECK(gptimer_register_event_callbacks(gp_timer, &cbs, NULL));
+    ESP_ERROR_CHECK(gptimer_set_alarm_action(gp_timer, &alarm_config));
+    ESP_ERROR_CHECK(gptimer_enable(gp_timer));
+
     init_comms();
     init_sensor();
 
-    xTaskCreatePinnedToCore(read_sensor, "read_sensor", 4 * 1024, data_ready_cb, tskIDLE_PRIORITY + 1, NULL, 0);
-    xTaskCreatePinnedToCore(send_message, "send_message", 4 * 1024, NULL, tskIDLE_PRIORITY + 1, &th_send_message, 1);
+    ESP_ERROR_CHECK(gptimer_start(gp_timer));
+    xTaskCreatePinnedToCore(read_sensor, "read_sensor", 4 * 1024, NULL, configMAX_PRIORITIES - 1, &th_read_sensor, 0);
+    xTaskCreatePinnedToCore(send_message, "send_message", 4 * 1024, NULL, tskIDLE_PRIORITY + 1, NULL, 1);
 }
