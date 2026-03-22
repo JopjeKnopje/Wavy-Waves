@@ -8,7 +8,7 @@ if(NOT DEFINED IDF_TARGET)
     set(IDF_TARGET "esp32")
 endif()
 
-message(NOTICE, "\n\n\nBuilding Mothership code\n")
+message(NOTICE, "\n\n\nBuilding Sensor code\n")
 add_compile_definitions(WW_MOTHERSHIP)
 
 
