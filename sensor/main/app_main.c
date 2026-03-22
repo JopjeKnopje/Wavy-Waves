@@ -1,4 +1,8 @@
+#include "FreeRTOSConfig.h"
 #include "bmp280.h"
+#include "driver/gpio.h"
+#include "esp_attr.h"
+#include "esp_err.h"
 #include "esp_log_level.h"
 #include "esp_now.h"
 #include "esp_wifi_types_generic.h"
@@ -7,6 +11,7 @@
 #include "freertos/projdefs.h"
 #include "freertos/task.h"
 
+#include "driver/gptimer.h"
 #include "esp_log.h"
 #include "esp_wifi.h"
 #include <stdint.h>
@@ -14,9 +19,11 @@
 #include <string.h>
 #include <sys/unistd.h>
 
+#include "hal/timer_types.h"
 #include "i2cdev.h"
 #include "lwip/pbuf.h"
 #include "portmacro.h"
+#include "soc/clk_tree_defs.h"
 #include "ww_data.h"
 
 #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(4, 4, 0)
@@ -37,7 +44,7 @@ static TaskHandle_t th_send_message;
 
 static bmp280_t sensor;
 
-#define READ_SENSOR_TASKDELAY (50)
+#define READ_SENSOR_TASKDELAY (10)
 
 static void app_wifi_init()
 {
@@ -145,13 +152,13 @@ void read_sensor(void *data)
 
     while (1)
     {
-		if (bmp280_read_float(&sensor, &x, &pressure, &y) != ESP_OK)
+        if (bmp280_read_float(&sensor, &x, &pressure, &y) != ESP_OK)
         {
             ESP_LOGE(TAG, "bmp280 read failed");
             continue;
         }
 
-		uint32_t data = (uint32_t) pressure;
+        uint32_t data = (uint32_t)pressure;
         if (xQueueSend(queue_sensor, &data, 10) != pdPASS)
         {
             ESP_LOGE(TAG, "failed adding data [%u] to queue", pressure);
@@ -177,17 +184,75 @@ void data_ready_cb(float x)
     }
 }
 
+#define PIN_PULSE 33
+
+static SemaphoreHandle_t timer_sem;
+static TaskHandle_t th_timed_task;
+
+bool IRAM_ATTR example_timer_on_alarm_cb(gptimer_handle_t timer, const gptimer_alarm_event_data_t *edata, void *user_ctx)
+{
+    static BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+
+    // if we caused a higher priority task to unblock, we should yield from this ISR and let that task run.
+    // xSemaphoreGiveFromISR(timer_sem, &xHigherPriorityTaskWoken);
+
+    vTaskNotifyGiveFromISR(th_timed_task, &xHigherPriorityTaskWoken);
+
+    portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+
+    return false;
+}
+
+static gptimer_handle_t gp_timer = NULL;
+static gptimer_config_t gp_timer_config = {
+    .clk_src = GPTIMER_CLK_SRC_DEFAULT,
+    .direction = GPTIMER_COUNT_UP,
+    // set the pre-scaler.
+    .resolution_hz = 2 * 1000 // 2 Khz
+};
+
+static gptimer_alarm_config_t alarm_config = {
+    .reload_count = 0,
+    .alarm_count = 1,
+    .flags.auto_reload_on_alarm = true,
+};
+
+gptimer_event_callbacks_t cbs = {
+    .on_alarm = example_timer_on_alarm_cb, // Call the user callback function when the alarm event occurs
+};
+
+void timed_task()
+{
+    while (1)
+    {
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        ESP_LOGI("timed_task", "hello");
+    }
+}
+
 void app_main()
 {
-    queue_sensor = xQueueCreate(QUEUE_PRESSURE_LEN, sizeof(uint32_t));
-    if (queue_sensor == NULL)
-    {
-        ESP_LOGE(TAG, "<%s> failed creating queue");
-    }
 
-    init_comms();
-    init_sensor();
+    timer_sem = xSemaphoreCreateBinary();
+    gpio_set_direction(PIN_PULSE, GPIO_MODE_OUTPUT);
+    ESP_ERROR_CHECK(gptimer_new_timer(&gp_timer_config, &gp_timer));
 
-    xTaskCreatePinnedToCore(read_sensor, "read_sensor", 4 * 1024, data_ready_cb, tskIDLE_PRIORITY + 1, NULL, 0);
-    xTaskCreatePinnedToCore(send_message, "send_message", 4 * 1024, NULL, tskIDLE_PRIORITY + 1, &th_send_message, 1);
+    ESP_ERROR_CHECK(gptimer_register_event_callbacks(gp_timer, &cbs, NULL));
+    ESP_ERROR_CHECK(gptimer_set_alarm_action(gp_timer, &alarm_config));
+    ESP_ERROR_CHECK(gptimer_enable(gp_timer));
+    ESP_ERROR_CHECK(gptimer_start(gp_timer));
+
+    xTaskCreatePinnedToCore(timed_task, "timed_task", 4 * 1024, NULL, configMAX_PRIORITIES - 1, &th_timed_task, 0);
+
+    // queue_sensor = xQueueCreate(QUEUE_PRESSURE_LEN, sizeof(uint32_t));
+    // if (queue_sensor == NULL)
+    // {
+    //     ESP_LOGE(TAG, "<%s> failed creating queue");
+    // }
+    //
+    // init_sensor();
+    // init_comms();
+    //
+    // xTaskCreatePinnedToCore(read_sensor, "read_sensor", 4 * 1024, data_ready_cb, tskIDLE_PRIORITY + 1, NULL, 0);
+    // xTaskCreatePinnedToCore(send_message, "send_message", 4 * 1024, NULL, tskIDLE_PRIORITY + 1, &th_send_message, 1);
 }
