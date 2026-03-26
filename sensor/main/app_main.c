@@ -3,6 +3,8 @@
 #include "driver/gpio.h"
 #include "driver/gptimer.h"
 #include "driver/gptimer_types.h"
+#include "driver/uart.h"
+#include "esp_err.h"
 #include "esp_log_level.h"
 #include "esp_now.h"
 #include "esp_wifi_types_generic.h"
@@ -15,6 +17,7 @@
 #include "esp_wifi.h"
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/types.h>
 #include <sys/unistd.h>
@@ -22,6 +25,7 @@
 #include "i2cdev.h"
 #include "lwip/pbuf.h"
 #include "portmacro.h"
+#include "samples.h"
 #include "soc/gpio_num.h"
 #include "ww_data.h"
 
@@ -64,31 +68,39 @@ static void app_wifi_init()
 
 void send_message()
 {
-    const size_t size = sizeof(uint32_t);
-
-    esp_err_t ret = ESP_OK;
-
     espnow_frame_head_t frame_head = {
         .retransmit_count = CONFIG_RETRY_NUM,
         .broadcast = false,
         .ack = true,
     };
 
+    samples_t samples;
+    samples_init(&samples);
+
     while (1)
     {
         uint32_t data;
-        if (xQueueReceive(queue_sensor, &data, 10) != pdPASS)
+        if (xQueueReceive(queue_sensor, &data, 8) != pdPASS)
         {
             ESP_LOGW(TAG, "no messages in queue");
             continue;
         }
 
-        ret = espnow_send(ESPNOW_DATA_TYPE_DATA, MOTHERSHIP_MAC, &data, size, &frame_head, portMAX_DELAY);
-        if (ret != ESP_OK)
+        const size_t free_spaces = samples_add(&samples, data);
+        if (free_spaces)
         {
-            ESP_LOGE(TAG, "<%s> espnow_send", esp_err_to_name(ret));
             continue;
         }
+
+        while (1)
+        {
+            esp_err_t ret = espnow_send(ESPNOW_DATA_TYPE_DATA, MOTHERSHIP_MAC, &samples, sizeof(samples_t), &frame_head, portMAX_DELAY);
+            if (ret != ESP_OK)
+                ESP_LOGE(TAG, "<%s> espnow_send", esp_err_to_name(ret));
+            else
+                break;
+        }
+        samples_reset(&samples);
 
         // ESP_LOGI(TAG, "espnow_send, size: %u, data: %u", size, data);
     }
@@ -140,8 +152,6 @@ bmp280_t init_sensor()
     return sensor;
 }
 
-typedef void(t_data_ready_cb)(float data);
-
 void read_sensor(void *data)
 {
     float pressure;
@@ -160,8 +170,7 @@ void read_sensor(void *data)
             continue;
         }
 
-        // Get rid of 10 micro bar
-        uint32_t data = (uint32_t)pressure / 10;
+        uint32_t data = (uint32_t)pressure;
         // TODO: use `ESP_ERROR_CHECK`?
         // Don't wait for the queue to be avaliable, if we do wait for any amount of time here. It will throw off `READ_SENSOR_INTERVAL_HZ`
         if (xQueueSend(queue_sensor, &data, 0) != pdPASS)
