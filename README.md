@@ -1,7 +1,7 @@
 <div align=center>
 
 # Wavy Waves
-ESP-NOW Sensor network for capturing water wave levels, using a BMP280 pressure sensor enclosed in a pipe. This data gets send to the ["Mothership"](HARDWARE.md), which uses a MCP4725 to generate a [Control Voltage](https://en.wikipedia.org/wiki/CV/gate#CV)
+ESP-NOW Sensor network for capturing water wave levels, using a BMP280 pressure sensor enclosed in a pipe. This data gets send to the ["Mothership"](HARDWARE.md), which uses a MCP4725 to generate a [control voltage](https://en.wikipedia.org/wiki/CV/gate#CV)
 
 <br />
 </div>
@@ -27,6 +27,7 @@ source ../set-env.sh
 Build the actual firmware
 ```
 idf.py build
+
 ```
 
 Flash the firmware
