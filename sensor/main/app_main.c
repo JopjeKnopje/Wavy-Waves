@@ -160,7 +160,8 @@ void read_sensor(void *data)
             continue;
         }
 
-        uint32_t data = (uint32_t)pressure;
+        // Get rid of 10 micro bar
+        uint32_t data = (uint32_t)pressure / 10;
         // TODO: use `ESP_ERROR_CHECK`?
         // Don't wait for the queue to be avaliable, if we do wait for any amount of time here. It will throw off `READ_SENSOR_INTERVAL_HZ`
         if (xQueueSend(queue_sensor, &data, 0) != pdPASS)
