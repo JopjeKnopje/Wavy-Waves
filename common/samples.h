@@ -3,12 +3,14 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
+#include <sys/types.h>
 
 #define SAMPLES_BUFFER_SIZE (40)
 
 typedef struct
 {
-    uint16_t samples[SAMPLES_BUFFER_SIZE];
+    uint16_t s_data[SAMPLES_BUFFER_SIZE];
     size_t index;
 } samples_t;
 
@@ -23,7 +25,7 @@ typedef enum
     DS_SAMPLES_FIRST = 0,
     DS_SAMPLES_SECOND = 1,
     DS_SAMPLES_MAX = 2,
-} double_samples_buffer_t;
+} double_samples_buffer_index_t;
 
 // will contain 2 samples, one which we are currently sending out and another one which is being received
 // we will only start writing the first buffer when we've received the next one.
@@ -37,7 +39,8 @@ typedef struct
 
 void dsample_init(double_samples_t *ds);
 void dsample_swap(double_samples_t *ds);
-void dsample_get_samples(double_samples_t *ds, samples_t *s);
+void dsample_copy_samples(double_samples_t *ds, samples_t *s);
+const samples_t *dsample_get_sample_handle(const double_samples_t *const ds);
 void dsample_set_samples(double_samples_t *ds, const samples_t *s);
 
 #endif

@@ -6,6 +6,7 @@
 
 #include "esp_log.h"
 #include "esp_wifi.h"
+#include "portmacro.h"
 #include "samples.h"
 
 #include <mcp4725.h>
@@ -87,14 +88,16 @@ static esp_err_t receive_handle(uint8_t *src_addr, void *data, size_t size, wifi
     ESP_PARAM_CHECK(size);
     ESP_PARAM_CHECK(rx_ctrl);
 
+    static size_t count = 0;
     const samples_t samples = *(samples_t *)data;
     // ESP_LOGI(TAG, "espnow_recv, <%" PRIu32 "> [" MACSTR "][%d][%d][%u]: %u", count++, MAC2STR(src_addr), rx_ctrl->channel, rx_ctrl->rssi, size,
-    // samples.samples[0]);
+    // samples.s_data[0]);
 
     // printf("%u\n", samples.samples[0]);
     dsample_set_samples(&double_samples, &samples);
     dsample_swap(&double_samples);
 
+    printf("receive core %d\n", xPortGetCoreID());
     return ESP_OK;
 }
 
@@ -107,7 +110,7 @@ static void task_write_dac()
 
     while (1)
     {
-        dsample_get_samples(&double_samples, &samples);
+        dsample_copy_samples(&double_samples, &samples);
         ESP_LOGI(TAG, "got samples\n");
         index = 0;
         while (index < SAMPLES_BUFFER_SIZE)
@@ -115,14 +118,15 @@ static void task_write_dac()
             // TODO: Implement some kind of DSP thingy here where it actually takes the average.
             const uint16_t center = 2048;
 
-            uint16_t dac_value = ((samples.samples[index] - 26000000) / 100 + center);
+            uint16_t dac_value = ((samples.s_data[index] - 26000000) / 100 + center);
 
             printf("%u\n", dac_value);
             ESP_ERROR_CHECK(mcp4725_set_raw_output(&dev, dac_value, false));
 
-            vTaskDelay(pdMS_TO_TICKS(13));
             index++;
+            vTaskDelay(pdMS_TO_TICKS(13));
         }
+        taskYIELD();
     }
 }
 
@@ -144,7 +148,8 @@ void app_main()
     init_comms();
     dsample_init(&double_samples);
 
+    // this espnow stuff runs on core 1, so we do our processing on core 0
     espnow_set_config_for_data_type(ESPNOW_DATA_TYPE_DATA, true, receive_handle);
 
-    xTaskCreatePinnedToCore(task_write_dac, "write_dac", 4 * 1024, NULL, 1, 0, 1);
+    xTaskCreatePinnedToCore(task_write_dac, "write_dac", 4 * 1024, NULL, 1, 0, 0);
 }

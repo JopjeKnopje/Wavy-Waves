@@ -1,7 +1,13 @@
 #include "samples.h"
+
+#ifndef UNITY_TESTING
 #include "esp_err.h"
-#include <string.h>
-#include <sys/types.h>
+
+#else
+// when running in Unity
+#include "../test/Unity/src/unity.h"
+#define ESP_ERROR_CHECK(x) TEST_ASSERT_FALSE(x)
+#endif
 
 void samples_init(samples_t *samples)
 {
@@ -22,7 +28,7 @@ size_t samples_add(samples_t *samples, uint16_t data)
     ESP_ERROR_CHECK(samples == NULL);
     ESP_ERROR_CHECK(samples->index >= SAMPLES_BUFFER_SIZE);
 
-    samples->samples[samples->index] = data;
+    samples->s_data[samples->index] = data;
     samples->index++;
 
     return samples_capacity(samples);
@@ -51,14 +57,17 @@ void dsample_swap(double_samples_t *ds)
 {
     ESP_ERROR_CHECK(ds == NULL);
     ds->handle = dsample_get_non_active_handle(ds);
+    ds->handle->index = 0;
 }
 
-void dsample_set_samples(double_samples_t *ds, const samples_t *s) { memcpy(ds->handle, s->samples, sizeof(uint16_t) * SAMPLES_BUFFER_SIZE); }
+void dsample_set_samples(double_samples_t *ds, const samples_t *s) { memcpy(ds->handle->s_data, s->s_data, sizeof(uint16_t) * SAMPLES_BUFFER_SIZE); }
 
-void dsample_get_samples(double_samples_t *ds, samples_t *s)
+const samples_t *dsample_get_sample_handle(const double_samples_t *const ds) { return ds->handle; }
+
+void dsample_copy_samples(double_samples_t *ds, samples_t *s)
 {
     // get the non active sample buffer.
     const samples_t *handle = dsample_get_non_active_handle(ds);
-    memcpy(s, handle, sizeof(uint16_t) * SAMPLES_BUFFER_SIZE);
+    memcpy(s->s_data, handle->s_data, sizeof(uint16_t) * SAMPLES_BUFFER_SIZE);
     // set flag that new buffer is ready for new data.
 }
