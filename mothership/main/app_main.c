@@ -1,6 +1,7 @@
 #include "esp_log_level.h"
 #include "esp_wifi_types_generic.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/projdefs.h"
 #include "freertos/task.h"
 
 #include "esp_log.h"
@@ -28,6 +29,8 @@
 static const char *TAG = "mothership";
 
 static i2c_dev_t dev;
+
+static double_samples_t double_samples;
 
 static void wait_for_eeprom(i2c_dev_t *dev)
 {
@@ -84,24 +87,43 @@ static esp_err_t receive_handle(uint8_t *src_addr, void *data, size_t size, wifi
     ESP_PARAM_CHECK(size);
     ESP_PARAM_CHECK(rx_ctrl);
 
-    static uint32_t count = 0;
-
     const samples_t samples = *(samples_t *)data;
-    ESP_LOGI(TAG, "espnow_recv, <%" PRIu32 "> [" MACSTR "][%d][%d][%u]: %u", count++, MAC2STR(src_addr), rx_ctrl->channel, rx_ctrl->rssi, size,
-             samples.samples[0]);
+    // ESP_LOGI(TAG, "espnow_recv, <%" PRIu32 "> [" MACSTR "][%d][%d][%u]: %u", count++, MAC2STR(src_addr), rx_ctrl->channel, rx_ctrl->rssi, size,
+    // samples.samples[0]);
 
-    printf("%u\n", samples.samples[0]);
-
-    // HAHAH WTF
-    // TODO: Implement some kind of DSP thingy here where it actually takes the average.
-    const uint32_t center = 2048;
-    //
-    uint16_t dac_value = ((samples.samples[0] - 26000000) / 100 + center);
-
-    // ESP_LOGI(TAG, "wiritng to DAC %u", dac_value);
-    ESP_ERROR_CHECK(mcp4725_set_raw_output(&dev, dac_value, false));
+    // printf("%u\n", samples.samples[0]);
+    dsample_set_samples(&double_samples, &samples);
+    dsample_swap(&double_samples);
 
     return ESP_OK;
+}
+
+static void task_write_dac()
+{
+
+    samples_t samples;
+
+    size_t index = 0;
+
+    while (1)
+    {
+        dsample_get_samples(&double_samples, &samples);
+        ESP_LOGI(TAG, "got samples\n");
+        index = 0;
+        while (index < SAMPLES_BUFFER_SIZE)
+        {
+            // TODO: Implement some kind of DSP thingy here where it actually takes the average.
+            const uint16_t center = 2048;
+
+            uint16_t dac_value = ((samples.samples[index] - 26000000) / 100 + center);
+
+            printf("%u\n", dac_value);
+            ESP_ERROR_CHECK(mcp4725_set_raw_output(&dev, dac_value, false));
+
+            vTaskDelay(pdMS_TO_TICKS(13));
+            index++;
+        }
+    }
 }
 
 void init_comms()
@@ -120,6 +142,9 @@ void app_main()
 {
     dac_init();
     init_comms();
+    dsample_init(&double_samples);
 
     espnow_set_config_for_data_type(ESPNOW_DATA_TYPE_DATA, true, receive_handle);
+
+    xTaskCreatePinnedToCore(task_write_dac, "write_dac", 4 * 1024, NULL, 1, 0, 1);
 }
