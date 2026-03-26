@@ -1,0 +1,8 @@
+signal,esp LyraT,audio kit
+cclk/scl,io23,io32
+cdata/sda,io18,io33
+mclk,io0,io0
+sclk,io5,io27
+lrclk,io25,io25
+dsin/din,io26,io35
+asdout/dout,io35,io26
