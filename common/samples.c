@@ -43,7 +43,7 @@ void dsample_init(double_samples_t *ds)
     ds->handle = &ds->buf[DS_SAMPLES_FIRST];
 }
 
-static samples_t *dsample_get_non_active_handle(double_samples_t *const ds)
+samples_t *dsample_get_non_active_handle(double_samples_t *const ds)
 {
     samples_t *handle;
     if (ds->handle == &ds->buf[DS_SAMPLES_FIRST])
@@ -60,9 +60,12 @@ void dsample_swap(double_samples_t *ds)
     ds->handle->index = 0;
 }
 
-void dsample_set_samples(double_samples_t *ds, const samples_t *s) { memcpy(ds->handle->s_data, s->s_data, sizeof(uint16_t) * SAMPLES_BUFFER_SIZE); }
+void dsample_set_samples(double_samples_t *ds, const samples_t *s)
+{
+    memcpy(dsample_get_sample_handle(ds)->s_data, s->s_data, sizeof(uint16_t) * SAMPLES_BUFFER_SIZE);
+}
 
-const samples_t *dsample_get_sample_handle(const double_samples_t *const ds) { return ds->handle; }
+samples_t *dsample_get_sample_handle(double_samples_t *ds) { return ds->handle; }
 
 void dsample_copy_samples(double_samples_t *ds, samples_t *s)
 {

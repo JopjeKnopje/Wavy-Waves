@@ -1,0 +1,10 @@
+#ifndef WW_CONFIG_H
+#define WW_CONFIG_H
+
+#define READ_SENSOR_INTERVAL_HZ (80)
+#define TIMER_RES_FREQ_HZ       (16 * 1000)
+#define TIMER_ALARM_COUNT       (TIMER_RES_FREQ_HZ / READ_SENSOR_INTERVAL_HZ)
+
+#define SAMPLES_BUFFER_SIZE (40)
+
+#endif // !DEBUG

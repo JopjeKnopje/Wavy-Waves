@@ -35,17 +35,13 @@
 
 #define QUEUE_PRESSURE_LEN (8)
 
-#define READ_SENSOR_INTERVAL_HZ (80)
-#define TIMER_RES_FREQ_HZ       (16 * 1000)
-#define TIMER_ALARM_COUNT       (TIMER_RES_FREQ_HZ / READ_SENSOR_INTERVAL_HZ)
-
 #include "espnow.h"
 #include "espnow_storage.h"
 #include "espnow_utils.h"
 
 static const char *TAG = "sensor";
 
-static QueueHandle_t queue_sensor;
+static QueueHandle_t queue_samples;
 
 static TaskHandle_t th_read_sensor;
 
@@ -79,13 +75,14 @@ void send_message()
 
     while (1)
     {
-        uint32_t data;
-        if (xQueueReceive(queue_sensor, &data, 8) != pdPASS)
+        uint16_t data;
+        if (xQueueReceive(queue_samples, &data, 8) != pdPASS)
         {
             ESP_LOGW(TAG, "no messages in queue");
             continue;
         }
 
+        // printf("%u\n", data);
         const size_t free_spaces = samples_add(&samples, data);
         if (free_spaces)
         {
@@ -98,11 +95,12 @@ void send_message()
             if (ret != ESP_OK)
                 ESP_LOGE(TAG, "<%s> espnow_send", esp_err_to_name(ret));
             else
+            {
+                ESP_LOGI(TAG, "espnow_send, data: %u", samples.s_data[0]);
                 break;
+            }
         }
         samples_reset(&samples);
-
-        // ESP_LOGI(TAG, "espnow_send, size: %u, data: %u", size, data);
     }
     vTaskDelete(NULL);
 }
@@ -158,30 +156,34 @@ void read_sensor(void *data)
     float y;
     float x;
     uint8_t state = 0;
+    static uint16_t wave = 0;
 
     while (1)
     {
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-        state = !state;
-        gpio_set_level(PIN_PULSE, state);
-        if (bmp280_read_float(&sensor, &x, &pressure, &y) != ESP_OK)
-        {
-            ESP_LOGE(TAG, "bmp280 read failed");
-            continue;
-        }
+        // state = !state;
+        // gpio_set_level(PIN_PULSE, state);
+        // if (bmp280_read_float(&sensor, &x, &pressure, &y) != ESP_OK)
+        // {
+        //     ESP_LOGE(TAG, "bmp280 read failed");
+        //     continue;
+        // }
 
-        uint32_t data = (uint32_t)pressure;
+        // uint16_t data = ((uint32_t)pressure) / 10;
+
         // TODO: use `ESP_ERROR_CHECK`?
         // Don't wait for the queue to be avaliable, if we do wait for any amount of time here. It will throw off `READ_SENSOR_INTERVAL_HZ`
-        if (xQueueSend(queue_sensor, &data, 0) != pdPASS)
+        if (xQueueSend(queue_samples, &wave, 0) != pdPASS)
         {
             // ESP_LOGE(TAG, "failed adding data [%u] to queue", pressure);
         }
+        wave += 8;
+        wave %= 4096;
     }
     vTaskDelete(NULL);
 }
 
-// TODO: shoudl this be IRAM_ATTR?
+// TODO: should this be IRAM_ATTR?
 bool IRAM_ATTR timer_callback(gptimer_handle_t timer, const gptimer_alarm_event_data_t *edata, void *user_ctx)
 {
     // TODO: should this be static?
@@ -226,8 +228,8 @@ void init_timers(uint32_t freq)
 
 void app_main()
 {
-    queue_sensor = xQueueCreate(QUEUE_PRESSURE_LEN, sizeof(uint32_t));
-    if (queue_sensor == NULL)
+    queue_samples = xQueueCreate(QUEUE_PRESSURE_LEN, sizeof(uint16_t));
+    if (queue_samples == NULL)
     {
         ESP_LOGE(TAG, "<%s> failed creating queue");
     }

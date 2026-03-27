@@ -1,6 +1,11 @@
+#include "driver/gpio.h"
+#include "driver/gptimer.h"
+#include "driver/gptimer_types.h"
+#include "esp_err.h"
 #include "esp_log_level.h"
 #include "esp_wifi_types_generic.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/idf_additions.h"
 #include "freertos/projdefs.h"
 #include "freertos/task.h"
 
@@ -8,11 +13,13 @@
 #include "esp_wifi.h"
 #include "portmacro.h"
 #include "samples.h"
+#include "ww_config.h"
 
 #include <mcp4725.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/types.h>
 #include <sys/unistd.h>
 
 #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(4, 4, 0)
@@ -27,11 +34,16 @@
 
 #define DATA_OFFSET (0)
 
+#define PIN_PULSE         (33)
+#define QUEUE_SAMPLES_LEN (8)
+
 static const char *TAG = "mothership";
 
 static i2c_dev_t dev;
 
 static double_samples_t double_samples;
+
+static QueueHandle_t queue_samples;
 
 static void wait_for_eeprom(i2c_dev_t *dev)
 {
@@ -81,55 +93,6 @@ static void app_wifi_init()
     ESP_ERROR_CHECK(esp_wifi_start());
 }
 
-static esp_err_t receive_handle(uint8_t *src_addr, void *data, size_t size, wifi_pkt_rx_ctrl_t *rx_ctrl)
-{
-    ESP_PARAM_CHECK(src_addr);
-    ESP_PARAM_CHECK(data);
-    ESP_PARAM_CHECK(size);
-    ESP_PARAM_CHECK(rx_ctrl);
-
-    static size_t count = 0;
-    const samples_t samples = *(samples_t *)data;
-    // ESP_LOGI(TAG, "espnow_recv, <%" PRIu32 "> [" MACSTR "][%d][%d][%u]: %u", count++, MAC2STR(src_addr), rx_ctrl->channel, rx_ctrl->rssi, size,
-    // samples.s_data[0]);
-
-    // printf("%u\n", samples.samples[0]);
-    dsample_set_samples(&double_samples, &samples);
-    dsample_swap(&double_samples);
-
-    printf("receive core %d\n", xPortGetCoreID());
-    return ESP_OK;
-}
-
-static void task_write_dac()
-{
-
-    samples_t samples;
-
-    size_t index = 0;
-
-    while (1)
-    {
-        dsample_copy_samples(&double_samples, &samples);
-        ESP_LOGI(TAG, "got samples\n");
-        index = 0;
-        while (index < SAMPLES_BUFFER_SIZE)
-        {
-            // TODO: Implement some kind of DSP thingy here where it actually takes the average.
-            const uint16_t center = 2048;
-
-            uint16_t dac_value = ((samples.s_data[index] - 26000000) / 100 + center);
-
-            printf("%u\n", dac_value);
-            ESP_ERROR_CHECK(mcp4725_set_raw_output(&dev, dac_value, false));
-
-            index++;
-            vTaskDelay(pdMS_TO_TICKS(13));
-        }
-        taskYIELD();
-    }
-}
-
 void init_comms()
 {
     espnow_storage_init();
@@ -142,11 +105,63 @@ void init_comms()
     espnow_del_peer(ESPNOW_ADDR_BROADCAST);
 }
 
+static esp_err_t receive_handle(uint8_t *src_addr, void *data, size_t size, wifi_pkt_rx_ctrl_t *rx_ctrl)
+{
+    ESP_PARAM_CHECK(src_addr);
+    ESP_PARAM_CHECK(data);
+    ESP_PARAM_CHECK(size);
+    ESP_PARAM_CHECK(rx_ctrl);
+
+    static size_t count = 0;
+    const samples_t samples = *(samples_t *)data;
+    ESP_LOGI(TAG, "espnow_recv, <%" PRIu32 "> [" MACSTR "][%d][%d][%u]: %u", count++, MAC2STR(src_addr), rx_ctrl->channel, rx_ctrl->rssi, size,
+             samples.s_data[0]);
+
+    if (xQueueSend(queue_samples, samples.s_data, 0) != pdPASS)
+    {
+        ESP_LOGE(TAG, "failed adding samples to queue");
+    }
+
+    return ESP_OK;
+}
+
+static void task_write_dac()
+{
+
+    while (1)
+    {
+        samples_t samples;
+        if (xQueueReceive(queue_samples, &samples, 8) != pdPASS)
+        {
+            ESP_LOGE(TAG, "failed getting sample from queue");
+            continue;
+        }
+
+        size_t index = 0;
+        while (index < SAMPLES_BUFFER_SIZE)
+        {
+            uint16_t dac_value = samples.s_data[index];
+            printf("%u\n", dac_value);
+            ESP_ERROR_CHECK(mcp4725_set_raw_output(&dev, dac_value, false));
+            index++;
+            vTaskDelay(pdMS_TO_TICKS(13));
+        }
+
+        ESP_LOGW(TAG, "after delay");
+    }
+}
+
 void app_main()
 {
     dac_init();
     init_comms();
     dsample_init(&double_samples);
+
+    queue_samples = xQueueCreate(QUEUE_SAMPLES_LEN, sizeof(uint16_t) * SAMPLES_BUFFER_SIZE);
+    if (queue_samples == NULL)
+    {
+        ESP_LOGE(TAG, "<%s> failed creating queue");
+    }
 
     // this espnow stuff runs on core 1, so we do our processing on core 0
     espnow_set_config_for_data_type(ESPNOW_DATA_TYPE_DATA, true, receive_handle);

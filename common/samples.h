@@ -1,12 +1,11 @@
 #ifndef SAMPLES_H
 #define SAMPLES_H
 
+#include "ww_config.h"
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
 #include <sys/types.h>
-
-#define SAMPLES_BUFFER_SIZE (40)
 
 typedef struct
 {
@@ -40,7 +39,8 @@ typedef struct
 void dsample_init(double_samples_t *ds);
 void dsample_swap(double_samples_t *ds);
 void dsample_copy_samples(double_samples_t *ds, samples_t *s);
-const samples_t *dsample_get_sample_handle(const double_samples_t *const ds);
+samples_t *dsample_get_sample_handle(double_samples_t *ds);
+samples_t *dsample_get_non_active_handle(double_samples_t *const ds);
 void dsample_set_samples(double_samples_t *ds, const samples_t *s);
 
 #endif
