@@ -37,7 +37,7 @@
 #define DATA_OFFSET (0)
 
 #define PIN_PULSE         (33)
-#define QUEUE_SAMPLES_LEN (1)
+#define QUEUE_SAMPLES_LEN (8)
 
 static const char *TAG = "mothership";
 
@@ -169,7 +169,10 @@ static void task_write_dac()
             }
         }
 
-        ESP_ERROR_CHECK(mcp4725_set_raw_output(&dev, playback.s_data[index], false));
+        // TODO: Maybe do calc somewhere else.
+        uint16_t dac_value = (playback.s_data[index] - 10180) * 40;
+        ESP_LOGI(TAG, "before: %u, after: %u", playback.s_data[index], dac_value);
+        ESP_ERROR_CHECK(mcp4725_set_raw_output(&dev, dac_value, false));
         index++;
     }
     vTaskDelete(NULL);

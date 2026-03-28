@@ -82,7 +82,7 @@ void send_message()
             continue;
         }
 
-        // printf("%u\n", data);
+        printf("%u\n", data);
         const size_t free_spaces = samples_add(&samples, data);
         if (free_spaces)
         {
@@ -96,7 +96,7 @@ void send_message()
                 ESP_LOGE(TAG, "<%s> espnow_send", esp_err_to_name(ret));
             else
             {
-                ESP_LOGI(TAG, "espnow_send, data: %u", samples.s_data[0]);
+                // ESP_LOGI(TAG, "espnow_send, data: %u", samples.s_data[0]);
                 break;
             }
         }
@@ -155,30 +155,24 @@ void read_sensor(void *data)
     float pressure;
     float y;
     float x;
-    uint8_t state = 0;
-    static uint16_t wave = 0;
 
     while (1)
     {
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-        // state = !state;
-        // gpio_set_level(PIN_PULSE, state);
-        // if (bmp280_read_float(&sensor, &x, &pressure, &y) != ESP_OK)
-        // {
-        //     ESP_LOGE(TAG, "bmp280 read failed");
-        //     continue;
-        // }
+        if (bmp280_read_float(&sensor, &x, &pressure, &y) != ESP_OK)
+        {
+            ESP_LOGE(TAG, "bmp280 read failed");
+            continue;
+        }
 
-        // uint16_t data = ((uint32_t)pressure) / 10;
+        uint16_t data = ((uint32_t)pressure) / 10;
 
         // TODO: use `ESP_ERROR_CHECK`?
         // Don't wait for the queue to be avaliable, if we do wait for any amount of time here. It will throw off `READ_SENSOR_INTERVAL_HZ`
-        if (xQueueSend(queue_samples, &wave, 0) != pdPASS)
+        if (xQueueSend(queue_samples, &data, 0) != pdPASS)
         {
-            // ESP_LOGE(TAG, "failed adding data [%u] to queue", pressure);
+            ESP_LOGE(TAG, "failed adding data [%u] to queue", pressure);
         }
-        wave += 2;
-        wave %= 4096;
     }
     vTaskDelete(NULL);
 }
