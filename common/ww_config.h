@@ -1,8 +1,8 @@
 #ifndef WW_CONFIG_H
 #define WW_CONFIG_H
 
-#define READ_SENSOR_INTERVAL_HZ (80 * 2)
-#define TIMER_RES_FREQ_HZ       (16 * 1000)
+#define READ_SENSOR_INTERVAL_HZ (10000 * 1 * 2)
+#define TIMER_RES_FREQ_HZ       (1000 * 1000)
 #define TIMER_ALARM_COUNT       (TIMER_RES_FREQ_HZ / READ_SENSOR_INTERVAL_HZ)
 
 // This value should be smaller than `ESPNOW_DATA_LEN = 218`
