@@ -169,7 +169,7 @@ static void task_write_dac()
             }
         }
 
-        // TODO: Maybe do calc somewhere else.
+        // TODO: Add offset to config
         uint16_t dac_value = (playback.s_data[index] - 10180) * 40;
         ESP_LOGI(TAG, "before: %u, after: %u", playback.s_data[index], dac_value);
         ESP_ERROR_CHECK(mcp4725_set_raw_output(&dev, dac_value, false));
