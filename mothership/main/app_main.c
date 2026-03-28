@@ -11,6 +11,8 @@
 
 #include "esp_log.h"
 #include "esp_wifi.h"
+#include "hal/gpio_types.h"
+#include "ping/ping_sock.h"
 #include "portmacro.h"
 #include "samples.h"
 #include "ww_config.h"
@@ -35,13 +37,11 @@
 #define DATA_OFFSET (0)
 
 #define PIN_PULSE         (33)
-#define QUEUE_SAMPLES_LEN (8)
+#define QUEUE_SAMPLES_LEN (1)
 
 static const char *TAG = "mothership";
 
 static i2c_dev_t dev;
-
-static double_samples_t double_samples;
 
 static QueueHandle_t queue_samples;
 
@@ -111,51 +111,111 @@ static esp_err_t receive_handle(uint8_t *src_addr, void *data, size_t size, wifi
     ESP_PARAM_CHECK(data);
     ESP_PARAM_CHECK(size);
     ESP_PARAM_CHECK(rx_ctrl);
+    gpio_set_level(PIN_PULSE, 1);
 
     static size_t count = 0;
-    const samples_t samples = *(samples_t *)data;
+    samples_t samples = *(samples_t *)data;
     ESP_LOGI(TAG, "espnow_recv, <%" PRIu32 "> [" MACSTR "][%d][%d][%u]: %u", count++, MAC2STR(src_addr), rx_ctrl->channel, rx_ctrl->rssi, size,
              samples.s_data[0]);
 
-    if (xQueueSend(queue_samples, samples.s_data, 0) != pdPASS)
+    // reset sample index
+    // samples.index = 0;
+    if (xQueueSend(queue_samples, samples.s_data, portMAX_DELAY) != pdPASS)
     {
         ESP_LOGE(TAG, "failed adding samples to queue");
     }
+    gpio_set_level(PIN_PULSE, 0);
 
     return ESP_OK;
 }
 
+static TaskHandle_t th_write_dac;
+
 static void task_write_dac()
 {
+    bool finished_buffer;
+
+    samples_t samples;
+    size_t index = 0;
 
     while (1)
     {
-        samples_t samples;
-        if (xQueueReceive(queue_samples, &samples, 8) != pdPASS)
+
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        finished_buffer = index >= SAMPLES_BUFFER_SIZE;
+        if (finished_buffer)
         {
-            ESP_LOGE(TAG, "failed getting sample from queue");
-            continue;
+            index = 0;
+            if (xQueueReceive(queue_samples, &samples, 0) != pdPASS)
+            {
+                ESP_LOGE(TAG, "failed getting sample from queue");
+                continue;
+            }
         }
 
-        size_t index = 0;
-        while (index < SAMPLES_BUFFER_SIZE)
+        if (!finished_buffer)
         {
             uint16_t dac_value = samples.s_data[index];
             printf("%u\n", dac_value);
             ESP_ERROR_CHECK(mcp4725_set_raw_output(&dev, dac_value, false));
             index++;
-            vTaskDelay(pdMS_TO_TICKS(13));
+            portYIELD();
         }
-
-        ESP_LOGW(TAG, "after delay");
     }
+    vTaskDelete(NULL);
+}
+
+bool IRAM_ATTR timer_callback(gptimer_handle_t timer, const gptimer_alarm_event_data_t *edata, void *user_ctx)
+{
+    // TODO: should this be static?
+    static BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+
+    // instead of fire task, we just step through buffer here.
+    vTaskNotifyGiveFromISR(th_write_dac, &xHigherPriorityTaskWoken);
+
+    portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+
+    return false;
+}
+
+void init_timers()
+{
+
+    static gptimer_handle_t gp_timer = NULL;
+    static gptimer_config_t gp_timer_config = {
+        .clk_src = GPTIMER_CLK_SRC_DEFAULT,
+        .direction = GPTIMER_COUNT_UP,
+        // frequency in which the timer should trigger.
+        .resolution_hz = TIMER_RES_FREQ_HZ,
+    };
+
+    static gptimer_alarm_config_t alarm_config = {
+        .reload_count = 0,
+        // amount of counts required before the alarm triggers.
+        .alarm_count = TIMER_ALARM_COUNT,
+        .flags.auto_reload_on_alarm = true,
+    };
+
+    gptimer_event_callbacks_t cbs = {
+        .on_alarm = timer_callback,
+    };
+
+    ESP_ERROR_CHECK(gptimer_new_timer(&gp_timer_config, &gp_timer));
+
+    ESP_ERROR_CHECK(gptimer_register_event_callbacks(gp_timer, &cbs, NULL));
+    ESP_ERROR_CHECK(gptimer_set_alarm_action(gp_timer, &alarm_config));
+    ESP_ERROR_CHECK(gptimer_enable(gp_timer));
+    ESP_ERROR_CHECK(gptimer_start(gp_timer));
 }
 
 void app_main()
 {
     dac_init();
     init_comms();
-    dsample_init(&double_samples);
+    init_timers();
+
+    gpio_set_direction(PIN_PULSE, GPIO_MODE_OUTPUT);
+    gpio_set_level(PIN_PULSE, 0);
 
     queue_samples = xQueueCreate(QUEUE_SAMPLES_LEN, sizeof(uint16_t) * SAMPLES_BUFFER_SIZE);
     if (queue_samples == NULL)
@@ -166,5 +226,5 @@ void app_main()
     // this espnow stuff runs on core 1, so we do our processing on core 0
     espnow_set_config_for_data_type(ESPNOW_DATA_TYPE_DATA, true, receive_handle);
 
-    xTaskCreatePinnedToCore(task_write_dac, "write_dac", 4 * 1024, NULL, 1, 0, 0);
+    xTaskCreatePinnedToCore(task_write_dac, "write_dac", 4 * 1024, NULL, configMAX_PRIORITIES - 1, &th_write_dac, 0);
 }

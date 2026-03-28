@@ -177,7 +177,7 @@ void read_sensor(void *data)
         {
             // ESP_LOGE(TAG, "failed adding data [%u] to queue", pressure);
         }
-        wave += 8;
+        wave += 2;
         wave %= 4096;
     }
     vTaskDelete(NULL);
@@ -196,7 +196,7 @@ bool IRAM_ATTR timer_callback(gptimer_handle_t timer, const gptimer_alarm_event_
     return false;
 }
 
-void init_timers(uint32_t freq)
+void init_timers()
 {
 
     static gptimer_handle_t gp_timer = NULL;
@@ -239,8 +239,10 @@ void app_main()
     init_comms();
     init_sensor();
 
-    init_timers(READ_SENSOR_INTERVAL_HZ);
+    init_timers();
 
     xTaskCreatePinnedToCore(read_sensor, "read_sensor", 4 * 1024, NULL, configMAX_PRIORITIES - 1, &th_read_sensor, 0);
     xTaskCreatePinnedToCore(send_message, "send_message", 4 * 1024, NULL, tskIDLE_PRIORITY + 1, NULL, 1);
+
+    vTaskDelete(NULL);
 }
