@@ -43,7 +43,7 @@ static const char *TAG = "mothership";
 
 static i2c_dev_t dev;
 
-static QueueHandle_t queue_samples;
+static QueueHandle_t q_playback;
 
 static void wait_for_eeprom(i2c_dev_t *dev)
 {
@@ -105,8 +105,15 @@ void init_comms()
     espnow_del_peer(ESPNOW_ADDR_BROADCAST);
 }
 
+typedef struct
+{
+    uint16_t s_data[SAMPLES_BUFFER_SIZE];
+    uint16_t playback_time;
+} timed_playback_t;
+
 static esp_err_t receive_handle(uint8_t *src_addr, void *data, size_t size, wifi_pkt_rx_ctrl_t *rx_ctrl)
 {
+
     ESP_PARAM_CHECK(src_addr);
     ESP_PARAM_CHECK(data);
     ESP_PARAM_CHECK(size);
@@ -118,9 +125,21 @@ static esp_err_t receive_handle(uint8_t *src_addr, void *data, size_t size, wifi
     ESP_LOGI(TAG, "espnow_recv, <%" PRIu32 "> [" MACSTR "][%d][%d][%u]: %u", count++, MAC2STR(src_addr), rx_ctrl->channel, rx_ctrl->rssi, size,
              samples.s_data[0]);
 
-    // reset sample index
-    // samples.index = 0;
-    if (xQueueSend(queue_samples, samples.s_data, portMAX_DELAY) != pdPASS)
+    static TickType_t old_tick = 0;
+    if (old_tick == 0)
+        old_tick = xTaskGetTickCount();
+
+    // take measurement of current received packet.
+    const TickType_t cur_tick = xTaskGetTickCount();
+    // get delta between old recieve time and current.
+    const TickType_t delta_tick = cur_tick - old_tick;
+    old_tick = cur_tick;
+
+    ESP_LOGI(TAG, "ticks: %u", delta_tick);
+
+    // TODO: Rename this variable lol wtf.
+    samples.index = delta_tick;
+    if (xQueueSend(q_playback, samples.s_data, portMAX_DELAY) != pdPASS)
     {
         ESP_LOGE(TAG, "failed adding samples to queue");
     }
@@ -133,34 +152,25 @@ static TaskHandle_t th_write_dac;
 
 static void task_write_dac()
 {
-    bool finished_buffer;
 
-    samples_t samples;
+    timed_playback_t playback;
     size_t index = 0;
 
     while (1)
     {
-
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-        finished_buffer = index >= SAMPLES_BUFFER_SIZE;
-        if (finished_buffer)
+        if (index >= SAMPLES_BUFFER_SIZE)
         {
             index = 0;
-            if (xQueueReceive(queue_samples, &samples, 0) != pdPASS)
+            if (xQueueReceive(q_playback, &playback, 0) != pdPASS)
             {
                 ESP_LOGE(TAG, "failed getting sample from queue");
                 continue;
             }
         }
 
-        if (!finished_buffer)
-        {
-            uint16_t dac_value = samples.s_data[index];
-            printf("%u\n", dac_value);
-            ESP_ERROR_CHECK(mcp4725_set_raw_output(&dev, dac_value, false));
-            index++;
-            portYIELD();
-        }
+        ESP_ERROR_CHECK(mcp4725_set_raw_output(&dev, playback.s_data[index], false));
+        index++;
     }
     vTaskDelete(NULL);
 }
@@ -212,19 +222,20 @@ void app_main()
 {
     dac_init();
     init_comms();
-    init_timers();
 
     gpio_set_direction(PIN_PULSE, GPIO_MODE_OUTPUT);
     gpio_set_level(PIN_PULSE, 0);
 
-    queue_samples = xQueueCreate(QUEUE_SAMPLES_LEN, sizeof(uint16_t) * SAMPLES_BUFFER_SIZE);
-    if (queue_samples == NULL)
+    q_playback = xQueueCreate(QUEUE_SAMPLES_LEN, sizeof(timed_playback_t));
+    if (q_playback == NULL)
     {
         ESP_LOGE(TAG, "<%s> failed creating queue");
     }
 
     // this espnow stuff runs on core 1, so we do our processing on core 0
     espnow_set_config_for_data_type(ESPNOW_DATA_TYPE_DATA, true, receive_handle);
+
+    init_timers();
 
     xTaskCreatePinnedToCore(task_write_dac, "write_dac", 4 * 1024, NULL, configMAX_PRIORITIES - 1, &th_write_dac, 0);
 }
