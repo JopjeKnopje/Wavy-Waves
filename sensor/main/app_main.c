@@ -91,7 +91,7 @@ void send_message()
 
         while (1)
         {
-            esp_err_t ret = espnow_send(ESPNOW_DATA_TYPE_DATA, MOTHERSHIP_MAC, &samples, sizeof(samples_t), &frame_head, portMAX_DELAY);
+            esp_err_t ret = espnow_send(ESPNOW_DATA_TYPE_DATA, MOTHERSHIP_MAC, &samples.s_data, sizeof(sample_buffer_t), &frame_head, portMAX_DELAY);
             if (ret != ESP_OK)
                 ESP_LOGE(TAG, "<%s> espnow_send", esp_err_to_name(ret));
             else

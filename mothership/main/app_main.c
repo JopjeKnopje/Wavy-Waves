@@ -16,6 +16,7 @@
 #include "portmacro.h"
 #include "samples.h"
 #include "ww_config.h"
+#include "ww_data.h"
 
 #include <mcp4725.h>
 #include <stdint.h>
@@ -107,13 +108,12 @@ void init_comms()
 
 typedef struct
 {
-    uint16_t s_data[SAMPLES_BUFFER_SIZE];
-    uint16_t playback_time;
+    sample_buffer_t s_data;
+    uint8_t dac_id;
 } timed_playback_t;
 
 static esp_err_t receive_handle(uint8_t *src_addr, void *data, size_t size, wifi_pkt_rx_ctrl_t *rx_ctrl)
 {
-
     ESP_PARAM_CHECK(src_addr);
     ESP_PARAM_CHECK(data);
     ESP_PARAM_CHECK(size);
@@ -121,25 +121,15 @@ static esp_err_t receive_handle(uint8_t *src_addr, void *data, size_t size, wifi
     gpio_set_level(PIN_PULSE, 1);
 
     static size_t count = 0;
-    samples_t samples = *(samples_t *)data;
+    timed_playback_t tpb;
+
+    memcpy(tpb.s_data, data, sizeof(sample_buffer_t));
+    tpb.dac_id = memcmp(src_addr, DEV_6_MAC, sizeof(espnow_addr_t)) != 0 ? 0 : 1;
+
     ESP_LOGI(TAG, "espnow_recv, <%" PRIu32 "> [" MACSTR "][%d][%d][%u]: %u", count++, MAC2STR(src_addr), rx_ctrl->channel, rx_ctrl->rssi, size,
-             samples.s_data[0]);
+             tpb.s_data[0]);
 
-    static TickType_t old_tick = 0;
-    if (old_tick == 0)
-        old_tick = xTaskGetTickCount();
-
-    // take measurement of current received packet.
-    const TickType_t cur_tick = xTaskGetTickCount();
-    // get delta between old recieve time and current.
-    const TickType_t delta_tick = cur_tick - old_tick;
-    old_tick = cur_tick;
-
-    ESP_LOGI(TAG, "ticks: %u", delta_tick);
-
-    // TODO: Rename this variable lol wtf.
-    samples.index = delta_tick;
-    if (xQueueSend(q_playback, samples.s_data, portMAX_DELAY) != pdPASS)
+    if (xQueueSend(q_playback, &tpb, portMAX_DELAY) != pdPASS)
     {
         ESP_LOGE(TAG, "failed adding samples to queue");
     }
@@ -167,6 +157,7 @@ static void task_write_dac()
                 ESP_LOGE(TAG, "failed getting sample from queue");
                 continue;
             }
+            ESP_LOGI(TAG, "dac id: %d", playback.dac_id);
         }
 
         // TODO: Add offset to config

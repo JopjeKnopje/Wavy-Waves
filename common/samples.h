@@ -7,9 +7,11 @@
 #include <string.h>
 #include <sys/types.h>
 
+typedef uint16_t sample_buffer_t[SAMPLES_BUFFER_SIZE];
+
 typedef struct
 {
-    uint16_t s_data[SAMPLES_BUFFER_SIZE];
+    sample_buffer_t s_data;
     size_t index;
 } samples_t;
 
