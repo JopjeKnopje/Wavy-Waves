@@ -1,6 +1,7 @@
 #include "driver/gpio.h"
 #include "driver/gptimer.h"
 #include "driver/gptimer_types.h"
+#include "driver/i2c_types.h"
 #include "esp_err.h"
 #include "esp_log_level.h"
 #include "esp_wifi_types_generic.h"
@@ -38,11 +39,18 @@
 #define DATA_OFFSET (0)
 
 #define PIN_PULSE         (33)
-#define QUEUE_SAMPLES_LEN (8)
+#define QUEUE_SAMPLES_LEN (32)
 
 static const char *TAG = "mothership";
 
-static i2c_dev_t dev;
+typedef enum
+{
+    DAC_0,
+    DAC_1,
+    DAC_MAX,
+} dac_index_t;
+
+static i2c_dev_t dacs[DAC_MAX];
 
 static QueueHandle_t q_playback;
 
@@ -59,26 +67,26 @@ static void wait_for_eeprom(i2c_dev_t *dev)
     }
 }
 
-void dac_init()
+void dac_init(i2c_dev_t *dev, uint8_t addr)
 {
     ESP_ERROR_CHECK(i2cdev_init());
 
-    memset(&dev, 0, sizeof(i2c_dev_t));
+    memset(dev, 0, sizeof(i2c_dev_t));
 
     // Init device descriptor
-    ESP_ERROR_CHECK(mcp4725_init_desc(&dev, MCP4725A0_I2C_ADDR0, 0, CONFIG_I2CDEV_DEFAULT_SDA_PIN, CONFIG_I2CDEV_DEFAULT_SCL_PIN));
+    ESP_ERROR_CHECK(mcp4725_init_desc(dev, addr, 0, CONFIG_I2CDEV_DEFAULT_SDA_PIN, CONFIG_I2CDEV_DEFAULT_SCL_PIN));
 
     mcp4725_power_mode_t pm;
-    ESP_ERROR_CHECK(mcp4725_get_power_mode(&dev, true, &pm));
+    ESP_ERROR_CHECK(mcp4725_get_power_mode(dev, true, &pm));
     if (pm != MCP4725_PM_NORMAL)
     {
-        // ESP_LOGI(TAG, "DAC was sleeping... Wake up Neo!\n");
-        ESP_ERROR_CHECK(mcp4725_set_power_mode(&dev, true, MCP4725_PM_NORMAL));
-        wait_for_eeprom(&dev);
+        ESP_ERROR_CHECK(mcp4725_set_power_mode(dev, true, MCP4725_PM_NORMAL));
+        wait_for_eeprom(dev);
     }
 
-    ESP_ERROR_CHECK(mcp4725_set_raw_output(&dev, 0, true));
-    wait_for_eeprom(&dev);
+    // put DAC at half voltage
+    ESP_ERROR_CHECK(mcp4725_set_raw_output(dev, 2047, true));
+    wait_for_eeprom(dev);
 }
 
 static void app_wifi_init()
@@ -109,7 +117,7 @@ void init_comms()
 typedef struct
 {
     sample_buffer_t s_data;
-    uint8_t dac_id;
+    dac_index_t dac_index;
 } timed_playback_t;
 
 static esp_err_t receive_handle(uint8_t *src_addr, void *data, size_t size, wifi_pkt_rx_ctrl_t *rx_ctrl)
@@ -124,7 +132,7 @@ static esp_err_t receive_handle(uint8_t *src_addr, void *data, size_t size, wifi
     timed_playback_t tpb;
 
     memcpy(tpb.s_data, data, sizeof(sample_buffer_t));
-    tpb.dac_id = memcmp(src_addr, DEV_6_MAC, sizeof(espnow_addr_t)) != 0 ? 0 : 1;
+    tpb.dac_index = memcmp(src_addr, DEV_6_MAC, sizeof(espnow_addr_t)) != 0 ? DAC_0 : DAC_1;
 
     ESP_LOGI(TAG, "espnow_recv, <%" PRIu32 "> [" MACSTR "][%d][%d][%u]: %u", count++, MAC2STR(src_addr), rx_ctrl->channel, rx_ctrl->rssi, size,
              tpb.s_data[0]);
@@ -157,13 +165,20 @@ static void task_write_dac()
                 ESP_LOGE(TAG, "failed getting sample from queue");
                 continue;
             }
-            ESP_LOGI(TAG, "dac id: %d", playback.dac_id);
+            ESP_LOGI(TAG, "dac id: %d", playback.dac_index);
         }
 
-        // TODO: Add offset to config
-        uint16_t dac_value = (playback.s_data[index] - 10180) * 40;
-        ESP_LOGI(TAG, "before: %u, after: %u", playback.s_data[index], dac_value);
-        ESP_ERROR_CHECK(mcp4725_set_raw_output(&dev, dac_value, false));
+        uint16_t dac_value = 0;
+        if (playback.dac_index == DAC_0)
+        {
+            dac_value = (playback.s_data[index] - 10160) * 40;
+        }
+        else
+        {
+            dac_value = playback.s_data[index];
+        }
+
+        ESP_ERROR_CHECK(mcp4725_set_raw_output(&dacs[playback.dac_index], dac_value, false));
         index++;
     }
     vTaskDelete(NULL);
@@ -184,19 +199,18 @@ bool IRAM_ATTR timer_callback(gptimer_handle_t timer, const gptimer_alarm_event_
 
 void init_timers()
 {
-
     static gptimer_handle_t gp_timer = NULL;
     static gptimer_config_t gp_timer_config = {
         .clk_src = GPTIMER_CLK_SRC_DEFAULT,
         .direction = GPTIMER_COUNT_UP,
         // frequency in which the timer should trigger.
-        .resolution_hz = TIMER_RES_FREQ_HZ,
+        .resolution_hz = PLAYBACK_TIMER_RES_FREQ_HZ,
     };
 
     static gptimer_alarm_config_t alarm_config = {
         .reload_count = 0,
         // amount of counts required before the alarm triggers.
-        .alarm_count = TIMER_ALARM_COUNT,
+        .alarm_count = PLAYBACK_TIMER_ALARM_COUNT,
         .flags.auto_reload_on_alarm = true,
     };
 
@@ -214,7 +228,8 @@ void init_timers()
 
 void app_main()
 {
-    dac_init();
+    dac_init(&dacs[DAC_0], MCP4725A0_I2C_ADDR0);
+    dac_init(&dacs[DAC_1], MCP4725A0_I2C_ADDR1);
     init_comms();
 
     gpio_set_direction(PIN_PULSE, GPIO_MODE_OUTPUT);

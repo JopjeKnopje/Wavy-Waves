@@ -27,13 +27,14 @@
 #include "portmacro.h"
 #include "samples.h"
 #include "soc/gpio_num.h"
+#include "ww_config.h"
 #include "ww_data.h"
 
 #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(4, 4, 0)
 #include "esp_mac.h"
 #endif
 
-#define QUEUE_PRESSURE_LEN (8)
+#define QUEUE_PRESSURE_LEN (32)
 
 #include "espnow.h"
 #include "espnow_storage.h"
@@ -82,7 +83,7 @@ void send_message()
             continue;
         }
 
-        printf("%u\n", data);
+        // printf("%u\n", data);
         const size_t free_spaces = samples_add(&samples, data);
         if (free_spaces)
         {
@@ -156,6 +157,7 @@ void read_sensor(void *data)
     float y;
     float x;
 
+    size_t value = 0;
     while (1)
     {
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
@@ -165,7 +167,8 @@ void read_sensor(void *data)
             continue;
         }
 
-        uint16_t data = ((uint32_t)pressure) / 10;
+        // uint16_t data = ((uint32_t)pressure) / 10;
+        uint16_t data = value;
 
         // TODO: use `ESP_ERROR_CHECK`?
         // Don't wait for the queue to be avaliable, if we do wait for any amount of time here. It will throw off `READ_SENSOR_INTERVAL_HZ`
@@ -173,6 +176,8 @@ void read_sensor(void *data)
         {
             ESP_LOGE(TAG, "failed adding data [%u] to queue", pressure);
         }
+        value += 8;
+        value %= 4095;
     }
     vTaskDelete(NULL);
 }
@@ -198,13 +203,13 @@ void init_timers()
         .clk_src = GPTIMER_CLK_SRC_DEFAULT,
         .direction = GPTIMER_COUNT_UP,
         // frequency in which the timer should trigger.
-        .resolution_hz = TIMER_RES_FREQ_HZ,
+        .resolution_hz = READ_TIMER_RES_FREQ_HZ,
     };
 
     static gptimer_alarm_config_t alarm_config = {
         .reload_count = 0,
         // amount of counts required before the alarm triggers.
-        .alarm_count = TIMER_ALARM_COUNT,
+        .alarm_count = READ_TIMER_ALARM_COUNT,
         .flags.auto_reload_on_alarm = true,
     };
 
