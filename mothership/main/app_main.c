@@ -52,7 +52,8 @@ typedef enum
 
 static i2c_dev_t dacs[DAC_MAX];
 
-static QueueHandle_t q_playback;
+static QueueHandle_t q_playback_dac_1;
+static QueueHandle_t q_playback_dac_2;
 
 static void wait_for_eeprom(i2c_dev_t *dev)
 {
@@ -137,7 +138,14 @@ static esp_err_t receive_handle(uint8_t *src_addr, void *data, size_t size, wifi
     ESP_LOGI(TAG, "espnow_recv, <%" PRIu32 "> [" MACSTR "][%d][%d][%u]: %u", count++, MAC2STR(src_addr), rx_ctrl->channel, rx_ctrl->rssi, size,
              tpb.s_data[0]);
 
-    if (xQueueSend(q_playback, &tpb, portMAX_DELAY) != pdPASS)
+    if (tpb.dac_index)
+    {
+        if (xQueueSend(q_playback_dac_1, &tpb, portMAX_DELAY) != pdPASS)
+        {
+            ESP_LOGE(TAG, "failed adding samples to queue");
+        }
+    }
+    else if (xQueueSend(q_playback_dac_2, &tpb, portMAX_DELAY) != pdPASS)
     {
         ESP_LOGE(TAG, "failed adding samples to queue");
     }
@@ -146,9 +154,10 @@ static esp_err_t receive_handle(uint8_t *src_addr, void *data, size_t size, wifi
     return ESP_OK;
 }
 
-static TaskHandle_t th_write_dac;
+static TaskHandle_t th_write_dac_1;
+static TaskHandle_t th_write_dac_2;
 
-static void task_write_dac()
+static void task_write_dac_1()
 {
 
     timed_playback_t playback;
@@ -160,7 +169,7 @@ static void task_write_dac()
         if (index >= SAMPLES_BUFFER_SIZE)
         {
             index = 0;
-            if (xQueueReceive(q_playback, &playback, 0) != pdPASS)
+            if (xQueueReceive(q_playback_dac_1, &playback, 0) != pdPASS)
             {
                 ESP_LOGE(TAG, "failed getting sample from queue");
                 continue;
@@ -169,14 +178,50 @@ static void task_write_dac()
         }
 
         uint16_t dac_value = 0;
-        if (playback.dac_index == DAC_0)
+        // if (playback.dac_index == DAC_0)
+        // {
+        // dac_value = (playback.s_data[index] - 10160) * 40;
+        // }
+        // else
+        // {
+        dac_value = playback.s_data[index];
+        // }
+
+        ESP_ERROR_CHECK(mcp4725_set_raw_output(&dacs[playback.dac_index], dac_value, false));
+        index++;
+    }
+    vTaskDelete(NULL);
+}
+
+static void task_write_dac_2()
+{
+
+    timed_playback_t playback;
+    size_t index = 0;
+
+    while (1)
+    {
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        if (index >= SAMPLES_BUFFER_SIZE)
         {
-            dac_value = (playback.s_data[index] - 10160) * 40;
+            index = 0;
+            if (xQueueReceive(q_playback_dac_2, &playback, 0) != pdPASS)
+            {
+                ESP_LOGE(TAG, "failed getting sample from queue");
+                continue;
+            }
+            ESP_LOGI(TAG, "dac id: %d", playback.dac_index);
         }
-        else
-        {
-            dac_value = playback.s_data[index];
-        }
+
+        uint16_t dac_value = 0;
+        // if (playback.dac_index == DAC_0)
+        // {
+        //     dac_value = (playback.s_data[index] - 10160) * 40;
+        // }
+        // else
+        // {
+        dac_value = playback.s_data[index];
+        // }
 
         ESP_ERROR_CHECK(mcp4725_set_raw_output(&dacs[playback.dac_index], dac_value, false));
         index++;
@@ -188,9 +233,13 @@ bool IRAM_ATTR timer_callback(gptimer_handle_t timer, const gptimer_alarm_event_
 {
     // TODO: should this be static?
     static BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+    static dac_index_t dac_index = DAC_0;
+
+    TaskHandle_t task_handle = dac_index == DAC_0 ? th_write_dac_1 : th_write_dac_2;
+    dac_index = !dac_index;
 
     // instead of fire task, we just step through buffer here.
-    vTaskNotifyGiveFromISR(th_write_dac, &xHigherPriorityTaskWoken);
+    vTaskNotifyGiveFromISR(task_handle, &xHigherPriorityTaskWoken);
 
     portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
 
@@ -228,6 +277,7 @@ void init_timers()
 
 void app_main()
 {
+    // TODO: Put timer code in timer.c file, we can pass along the timer `FREQ` and `COUNT`
     dac_init(&dacs[DAC_0], MCP4725A0_I2C_ADDR0);
     dac_init(&dacs[DAC_1], MCP4725A0_I2C_ADDR1);
     init_comms();
@@ -235,8 +285,9 @@ void app_main()
     gpio_set_direction(PIN_PULSE, GPIO_MODE_OUTPUT);
     gpio_set_level(PIN_PULSE, 0);
 
-    q_playback = xQueueCreate(QUEUE_SAMPLES_LEN, sizeof(timed_playback_t));
-    if (q_playback == NULL)
+    q_playback_dac_1 = xQueueCreate(QUEUE_SAMPLES_LEN, sizeof(timed_playback_t));
+    q_playback_dac_2 = xQueueCreate(QUEUE_SAMPLES_LEN, sizeof(timed_playback_t));
+    if (q_playback_dac_1 == NULL || q_playback_dac_2 == NULL)
     {
         ESP_LOGE(TAG, "<%s> failed creating queue");
     }
@@ -246,5 +297,6 @@ void app_main()
 
     init_timers();
 
-    xTaskCreatePinnedToCore(task_write_dac, "write_dac", 4 * 1024, NULL, configMAX_PRIORITIES - 1, &th_write_dac, 0);
+    xTaskCreatePinnedToCore(task_write_dac_1, "write_dac", 4 * 1024, NULL, configMAX_PRIORITIES - 1, &th_write_dac_1, 0);
+    xTaskCreatePinnedToCore(task_write_dac_2, "write_dac", 4 * 1024, NULL, configMAX_PRIORITIES - 1, &th_write_dac_2, 0);
 }

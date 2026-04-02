@@ -3,12 +3,8 @@
 #include "driver/gpio.h"
 #include "driver/gptimer.h"
 #include "driver/gptimer_types.h"
-#include "driver/uart.h"
 #include "esp_err.h"
-#include "esp_log_level.h"
-#include "esp_now.h"
 #include "esp_wifi_types_generic.h"
-#include "freertos/FreeRTOS.h"
 #include "freertos/idf_additions.h"
 #include "freertos/projdefs.h"
 #include "freertos/task.h"
@@ -23,10 +19,8 @@
 #include <sys/unistd.h>
 
 #include "i2cdev.h"
-#include "lwip/pbuf.h"
 #include "portmacro.h"
 #include "samples.h"
-#include "soc/gpio_num.h"
 #include "ww_config.h"
 #include "ww_data.h"
 
