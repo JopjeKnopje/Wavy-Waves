@@ -1,19 +1,11 @@
-#include "driver/gpio.h"
-#include "driver/gptimer.h"
 #include "driver/gptimer_types.h"
-#include "driver/i2c_types.h"
 #include "esp_err.h"
-#include "esp_log_level.h"
-#include "esp_wifi_types_generic.h"
-#include "freertos/FreeRTOS.h"
 #include "freertos/idf_additions.h"
 #include "freertos/projdefs.h"
 #include "freertos/task.h"
+#include "init_code.h"
 
 #include "esp_log.h"
-#include "esp_wifi.h"
-#include "hal/gpio_types.h"
-#include "ping/ping_sock.h"
 #include "portmacro.h"
 #include "samples.h"
 #include "ww_config.h"
@@ -31,7 +23,6 @@
 #endif
 
 #include "espnow.h"
-#include "espnow_storage.h"
 #include "espnow_utils.h"
 
 #define DAC_VDD (5)
@@ -45,81 +36,40 @@ static const char *TAG = "mothership";
 
 typedef enum
 {
-    DAC_0,
-    DAC_1,
-    DAC_MAX,
+    DAC_0 = 0,
+    DAC_1 = 1,
+    DAC_MAX = 2,
 } dac_index_t;
-
-static i2c_dev_t dacs[DAC_MAX];
-
-static QueueHandle_t q_playback_dac_1;
-static QueueHandle_t q_playback_dac_2;
-
-static void wait_for_eeprom(i2c_dev_t *dev)
-{
-    bool busy;
-    while (true)
-    {
-        ESP_ERROR_CHECK(mcp4725_eeprom_busy(dev, &busy));
-        if (!busy)
-            return;
-        printf("...DAC is busy, waiting...\n");
-        vTaskDelay(1);
-    }
-}
-
-void dac_init(i2c_dev_t *dev, uint8_t addr)
-{
-    ESP_ERROR_CHECK(i2cdev_init());
-
-    memset(dev, 0, sizeof(i2c_dev_t));
-
-    // Init device descriptor
-    ESP_ERROR_CHECK(mcp4725_init_desc(dev, addr, 0, CONFIG_I2CDEV_DEFAULT_SDA_PIN, CONFIG_I2CDEV_DEFAULT_SCL_PIN));
-
-    mcp4725_power_mode_t pm;
-    ESP_ERROR_CHECK(mcp4725_get_power_mode(dev, true, &pm));
-    if (pm != MCP4725_PM_NORMAL)
-    {
-        ESP_ERROR_CHECK(mcp4725_set_power_mode(dev, true, MCP4725_PM_NORMAL));
-        wait_for_eeprom(dev);
-    }
-
-    // put DAC at half voltage
-    ESP_ERROR_CHECK(mcp4725_set_raw_output(dev, 2047, true));
-    wait_for_eeprom(dev);
-}
-
-static void app_wifi_init()
-{
-    esp_event_loop_create_default();
-
-    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-
-    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
-    ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_RAM));
-    ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
-    ESP_ERROR_CHECK(esp_wifi_start());
-}
-
-void init_comms()
-{
-    espnow_storage_init();
-    app_wifi_init();
-
-    espnow_config_t espnow_config = ESPNOW_INIT_CONFIG_DEFAULT();
-    espnow_init(&espnow_config);
-
-    // Get rid of broadcast peer, this is set by default in `espnow_init`.
-    espnow_del_peer(ESPNOW_ADDR_BROADCAST);
-}
 
 typedef struct
 {
     sample_buffer_t s_data;
-    dac_index_t dac_index;
-} timed_playback_t;
+    uint8_t s_index;
+} playback_t;
+
+static void playback_init(playback_t *p, void *data)
+{
+    ESP_ERROR_CHECK(!(memcpy(p->s_data, data, sizeof(sample_buffer_t)) == p->s_data));
+    p->s_index = 0;
+}
+
+typedef struct
+{
+    QueueHandle_t queue;
+    i2c_dev_t dev_handle;
+    dac_index_t id;
+} dac_writer_handle_t;
+
+static dac_writer_handle_t dacs[DAC_MAX];
+static TaskHandle_t th_dacs[DAC_MAX];
+
+void dac_writer_init(dac_writer_handle_t *dh, dac_index_t id, uint8_t dac_addr)
+{
+    dh->id = id;
+    dac_init(&dh->dev_handle, dac_addr);
+    dh->queue = xQueueCreate(QUEUE_SAMPLES_LEN, sizeof(playback_t));
+    ESP_ERROR_CHECK(dh->queue == NULL);
+}
 
 static esp_err_t receive_handle(uint8_t *src_addr, void *data, size_t size, wifi_pkt_rx_ctrl_t *rx_ctrl)
 {
@@ -127,104 +77,82 @@ static esp_err_t receive_handle(uint8_t *src_addr, void *data, size_t size, wifi
     ESP_PARAM_CHECK(data);
     ESP_PARAM_CHECK(size);
     ESP_PARAM_CHECK(rx_ctrl);
-    gpio_set_level(PIN_PULSE, 1);
 
     static size_t count = 0;
-    timed_playback_t tpb;
+    playback_t playback;
 
-    memcpy(tpb.s_data, data, sizeof(sample_buffer_t));
-    tpb.dac_index = memcmp(src_addr, DEV_6_MAC, sizeof(espnow_addr_t)) != 0 ? DAC_0 : DAC_1;
+    playback_init(&playback, data);
 
     ESP_LOGI(TAG, "espnow_recv, <%" PRIu32 "> [" MACSTR "][%d][%d][%u]: %u", count++, MAC2STR(src_addr), rx_ctrl->channel, rx_ctrl->rssi, size,
-             tpb.s_data[0]);
+             playback.s_data[0]);
 
-    if (tpb.dac_index)
+    // TODO: Have list of DACs and assign based on availability at startup.
+    // Have map[MAC_ADDR, DAC_INDEX] to dynamically map DACs.
+
+    dac_index_t dac_index;
+
+    bool is_from_dev_6 = memcmp(src_addr, DEV_6_MAC, sizeof(espnow_addr_t)) == 0;
+    if (is_from_dev_6)
+        dac_index = DAC_0;
+    else
+        dac_index = DAC_1;
+
+    if (xQueueSend(dacs[dac_index].queue, &playback, portMAX_DELAY) != pdPASS)
     {
-        if (xQueueSend(q_playback_dac_1, &tpb, portMAX_DELAY) != pdPASS)
-        {
-            ESP_LOGE(TAG, "failed adding samples to queue");
-        }
+        ESP_LOGE(TAG, "DAC: [%d] failed adding samples to queue", dac_index);
     }
-    else if (xQueueSend(q_playback_dac_2, &tpb, portMAX_DELAY) != pdPASS)
-    {
-        ESP_LOGE(TAG, "failed adding samples to queue");
-    }
-    gpio_set_level(PIN_PULSE, 0);
 
     return ESP_OK;
 }
 
-static TaskHandle_t th_write_dac_1;
-static TaskHandle_t th_write_dac_2;
-
-static void task_write_dac_1()
+static bool receive_playback_from_queue(playback_t *playback, QueueHandle_t pbq, dac_index_t dac_id)
 {
 
-    timed_playback_t playback;
-    size_t index = 0;
-
-    while (1)
+    if (playback->s_index >= SAMPLES_BUFFER_SIZE)
     {
-        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-        if (index >= SAMPLES_BUFFER_SIZE)
-        {
-            index = 0;
-            if (xQueueReceive(q_playback_dac_1, &playback, 0) != pdPASS)
-            {
-                ESP_LOGE(TAG, "failed getting sample from queue");
-                continue;
-            }
-            ESP_LOGI(TAG, "dac id: %d", playback.dac_index);
-        }
-
-        uint16_t dac_value = 0;
-        // if (playback.dac_index == DAC_0)
-        // {
-        // dac_value = (playback.s_data[index] - 10160) * 40;
-        // }
-        // else
-        // {
-        dac_value = playback.s_data[index];
-        // }
-
-        ESP_ERROR_CHECK(mcp4725_set_raw_output(&dacs[playback.dac_index], dac_value, false));
-        index++;
+        if (xQueueReceive(pbq, playback, 0) != pdPASS)
+            return false;
+        playback->s_index = 0;
     }
-    vTaskDelete(NULL);
+    return true;
 }
 
-static void task_write_dac_2()
+static void task_write_dac(void *param)
 {
+    const static uint8_t ERROR_COUNT = 3;
 
-    timed_playback_t playback;
-    size_t index = 0;
+    dac_writer_handle_t *dac_handle = (dac_writer_handle_t *)param;
+    playback_t playback;
+
+    size_t errors = 0;
 
     while (1)
     {
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-        if (index >= SAMPLES_BUFFER_SIZE)
+        bool success = receive_playback_from_queue(&playback, dac_handle->queue, dac_handle->id);
+        if (!success)
         {
-            index = 0;
-            if (xQueueReceive(q_playback_dac_2, &playback, 0) != pdPASS)
-            {
-                ESP_LOGE(TAG, "failed getting sample from queue");
-                continue;
-            }
-            ESP_LOGI(TAG, "dac id: %d", playback.dac_index);
+            ESP_LOGE(TAG, "DAC: [%d] queue empty", dac_handle->id);
+            errors++;
+        }
+        else
+            errors = 0;
+
+        if (errors > ERROR_COUNT)
+        {
+            ESP_LOGE(TAG, "DAC: [%d] sensor offline?", dac_handle->id);
+            // dirty delay to fix getting stuck in error state when both sensors start transmitting again.
+            vTaskDelay(pdMS_TO_TICKS(10));
+            continue;
         }
 
-        uint16_t dac_value = 0;
-        // if (playback.dac_index == DAC_0)
-        // {
-        //     dac_value = (playback.s_data[index] - 10160) * 40;
-        // }
-        // else
-        // {
-        dac_value = playback.s_data[index];
-        // }
+        // uint16_t dac_value = (playback.s_data[playback.s_index] - 10160) * 40;
+        uint16_t dac_value = playback.s_data[playback.s_index];
 
-        ESP_ERROR_CHECK(mcp4725_set_raw_output(&dacs[playback.dac_index], dac_value, false));
-        index++;
+        // TODO: Set eeprom to true?
+        // ESP_LOGI(TAG, "dac index : %d", dac_handle->id);
+        ESP_ERROR_CHECK(mcp4725_set_raw_output(&dac_handle->dev_handle, dac_value, false));
+        playback.s_index++;
     }
     vTaskDelete(NULL);
 }
@@ -235,68 +163,27 @@ bool IRAM_ATTR timer_callback(gptimer_handle_t timer, const gptimer_alarm_event_
     static BaseType_t xHigherPriorityTaskWoken = pdFALSE;
     static dac_index_t dac_index = DAC_0;
 
-    TaskHandle_t task_handle = dac_index == DAC_0 ? th_write_dac_1 : th_write_dac_2;
     dac_index = !dac_index;
-
-    // instead of fire task, we just step through buffer here.
-    vTaskNotifyGiveFromISR(task_handle, &xHigherPriorityTaskWoken);
+    vTaskNotifyGiveFromISR(th_dacs[dac_index], &xHigherPriorityTaskWoken);
 
     portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
 
     return false;
 }
 
-void init_timers()
-{
-    static gptimer_handle_t gp_timer = NULL;
-    static gptimer_config_t gp_timer_config = {
-        .clk_src = GPTIMER_CLK_SRC_DEFAULT,
-        .direction = GPTIMER_COUNT_UP,
-        // frequency in which the timer should trigger.
-        .resolution_hz = PLAYBACK_TIMER_RES_FREQ_HZ,
-    };
-
-    static gptimer_alarm_config_t alarm_config = {
-        .reload_count = 0,
-        // amount of counts required before the alarm triggers.
-        .alarm_count = PLAYBACK_TIMER_ALARM_COUNT,
-        .flags.auto_reload_on_alarm = true,
-    };
-
-    gptimer_event_callbacks_t cbs = {
-        .on_alarm = timer_callback,
-    };
-
-    ESP_ERROR_CHECK(gptimer_new_timer(&gp_timer_config, &gp_timer));
-
-    ESP_ERROR_CHECK(gptimer_register_event_callbacks(gp_timer, &cbs, NULL));
-    ESP_ERROR_CHECK(gptimer_set_alarm_action(gp_timer, &alarm_config));
-    ESP_ERROR_CHECK(gptimer_enable(gp_timer));
-    ESP_ERROR_CHECK(gptimer_start(gp_timer));
-}
-
 void app_main()
 {
-    // TODO: Put timer code in timer.c file, we can pass along the timer `FREQ` and `COUNT`
-    dac_init(&dacs[DAC_0], MCP4725A0_I2C_ADDR0);
-    dac_init(&dacs[DAC_1], MCP4725A0_I2C_ADDR1);
+    dac_writer_init(&dacs[DAC_0], DAC_0, MCP4725A0_I2C_ADDR0);
+    dac_writer_init(&dacs[DAC_1], DAC_1, MCP4725A0_I2C_ADDR1);
+
     init_comms();
-
-    gpio_set_direction(PIN_PULSE, GPIO_MODE_OUTPUT);
-    gpio_set_level(PIN_PULSE, 0);
-
-    q_playback_dac_1 = xQueueCreate(QUEUE_SAMPLES_LEN, sizeof(timed_playback_t));
-    q_playback_dac_2 = xQueueCreate(QUEUE_SAMPLES_LEN, sizeof(timed_playback_t));
-    if (q_playback_dac_1 == NULL || q_playback_dac_2 == NULL)
-    {
-        ESP_LOGE(TAG, "<%s> failed creating queue");
-    }
 
     // this espnow stuff runs on core 1, so we do our processing on core 0
     espnow_set_config_for_data_type(ESPNOW_DATA_TYPE_DATA, true, receive_handle);
 
-    init_timers();
+    xTaskCreatePinnedToCore(task_write_dac, "write_dac_0", 4 * 1024, &dacs[DAC_0], configMAX_PRIORITIES - 1, &th_dacs[DAC_0], 0);
+    xTaskCreatePinnedToCore(task_write_dac, "write_dac_1", 4 * 1024, &dacs[DAC_1], configMAX_PRIORITIES - 1, &th_dacs[DAC_1], 0);
 
-    xTaskCreatePinnedToCore(task_write_dac_1, "write_dac", 4 * 1024, NULL, configMAX_PRIORITIES - 1, &th_write_dac_1, 0);
-    xTaskCreatePinnedToCore(task_write_dac_2, "write_dac", 4 * 1024, NULL, configMAX_PRIORITIES - 1, &th_write_dac_2, 0);
+    // TODO: Put timer code in timer.c file, we can pass along the timer `FREQ` and `COUNT`
+    timers_init(timer_callback);
 }

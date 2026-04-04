@@ -151,7 +151,8 @@ void read_sensor(void *data)
     float y;
     float x;
 
-    size_t value = 0;
+    size_t wave = 0;
+
     while (1)
     {
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
@@ -162,16 +163,16 @@ void read_sensor(void *data)
         }
 
         // uint16_t data = ((uint32_t)pressure) / 10;
-        uint16_t data = value;
+        uint16_t data = wave;
 
         // TODO: use `ESP_ERROR_CHECK`?
         // Don't wait for the queue to be avaliable, if we do wait for any amount of time here. It will throw off `READ_SENSOR_INTERVAL_HZ`
         if (xQueueSend(queue_samples, &data, 0) != pdPASS)
         {
-            ESP_LOGE(TAG, "failed adding data [%u] to queue", pressure);
+            ESP_LOGE(TAG, "failed adding data [%u] to queue", data);
         }
-        value += 8;
-        value %= 4095;
+        wave += 8 * 8;
+        wave %= 4096;
     }
     vTaskDelete(NULL);
 }
@@ -189,7 +190,7 @@ bool IRAM_ATTR timer_callback(gptimer_handle_t timer, const gptimer_alarm_event_
     return false;
 }
 
-void init_timers()
+void timers_init()
 {
 
     static gptimer_handle_t gp_timer = NULL;
@@ -232,7 +233,7 @@ void app_main()
     init_comms();
     init_sensor();
 
-    init_timers();
+    timers_init();
 
     xTaskCreatePinnedToCore(read_sensor, "read_sensor", 4 * 1024, NULL, configMAX_PRIORITIES - 1, &th_read_sensor, 0);
     xTaskCreatePinnedToCore(send_message, "send_message", 4 * 1024, NULL, tskIDLE_PRIORITY + 1, NULL, 1);
