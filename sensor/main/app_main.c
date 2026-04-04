@@ -162,8 +162,8 @@ void read_sensor(void *data)
             continue;
         }
 
-        // uint16_t data = ((uint32_t)pressure) / 10;
-        uint16_t data = wave;
+        uint16_t data = ((uint32_t)pressure) / 10;
+        // uint16_t data = wave;
 
         // TODO: use `ESP_ERROR_CHECK`?
         // Don't wait for the queue to be avaliable, if we do wait for any amount of time here. It will throw off `READ_SENSOR_INTERVAL_HZ`
