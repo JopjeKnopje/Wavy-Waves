@@ -11,6 +11,9 @@ This repo contains the code for both the ["Mothership"](mothership) and the ["Se
 
 For the hardware take a look at [HARDWARE.md](HARDWARE.md)
 
+## TODO
+- [ ] Proper logging system instead of just spamming the console with messages.
+- [ ] Serial interface to setup the upper and lower bound for the pressure sensors.
 
 ## Building the firmware
 Move into the directory of the device you want to build for, either.
@@ -91,8 +94,6 @@ prek install
 ```
 
 prek will run automatically on every commit you make, but you can run it manually using.
-```bash
-```
 ```
 prek run --all-files
 ```
