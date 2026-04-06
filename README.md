@@ -30,7 +30,6 @@ source ../set-env.sh
 Build the actual firmware
 ```
 idf.py build
-
 ```
 
 Flash the firmware
@@ -41,7 +40,7 @@ idf.py flash -p /dev/XXX
 ```
 
 > [!TIP]
->  You can combine the commands above comands
+> You can combine the commands above comands
 >```bash
 > idf.py -p /dev/ttyUSB0 build flash monitor
 >```
