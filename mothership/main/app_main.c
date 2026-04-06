@@ -146,6 +146,7 @@ static void task_write_dac(void *param)
             continue;
         }
 
+		// TODO: 
         uint16_t dac_value = (playback.s_data[playback.s_index] - 10160) * 40;
         // uint16_t dac_value = playback.s_data[playback.s_index];
 
