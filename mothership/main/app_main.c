@@ -91,11 +91,11 @@ static esp_err_t receive_handle(uint8_t *src_addr, void *data, size_t size, wifi
 
     dac_index_t dac_index;
 
-    bool is_from_dev_6 = memcmp(src_addr, DEV_6_MAC, sizeof(espnow_addr_t)) == 0;
-    if (is_from_dev_6)
-        dac_index = DAC_0;
-    else
-        dac_index = DAC_1;
+    // bool is_from_dev_6 = memcmp(src_addr, DEV_6_MAC, sizeof(espnow_addr_t)) == 0;
+    // if (is_from_dev_6)
+	dac_index = DAC_0;
+    // else
+    //     dac_index = DAC_1;
 
     if (xQueueSend(dacs[dac_index].queue, &playback, portMAX_DELAY) != pdPASS)
     {
@@ -164,7 +164,7 @@ bool IRAM_ATTR timer_callback(gptimer_handle_t timer, const gptimer_alarm_event_
     static BaseType_t xHigherPriorityTaskWoken = pdFALSE;
     static dac_index_t dac_index = DAC_0;
 
-    dac_index = !dac_index;
+    // dac_index = !dac_index;
     vTaskNotifyGiveFromISR(th_dacs[dac_index], &xHigherPriorityTaskWoken);
 
     portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
@@ -175,7 +175,7 @@ bool IRAM_ATTR timer_callback(gptimer_handle_t timer, const gptimer_alarm_event_
 void app_main()
 {
     dac_writer_init(&dacs[DAC_0], DAC_0, MCP4725A0_I2C_ADDR0);
-    dac_writer_init(&dacs[DAC_1], DAC_1, MCP4725A0_I2C_ADDR1);
+    // dac_writer_init(&dacs[DAC_1], DAC_1, MCP4725A0_I2C_ADDR1);
 
     init_comms();
 
@@ -183,7 +183,7 @@ void app_main()
     espnow_set_config_for_data_type(ESPNOW_DATA_TYPE_DATA, true, receive_handle);
 
     xTaskCreatePinnedToCore(task_write_dac, "write_dac_0", 4 * 1024, &dacs[DAC_0], configMAX_PRIORITIES - 1, &th_dacs[DAC_0], 0);
-    xTaskCreatePinnedToCore(task_write_dac, "write_dac_1", 4 * 1024, &dacs[DAC_1], configMAX_PRIORITIES - 1, &th_dacs[DAC_1], 0);
+    // xTaskCreatePinnedToCore(task_write_dac, "write_dac_1", 4 * 1024, &dacs[DAC_1], configMAX_PRIORITIES - 1, &th_dacs[DAC_1], 0);
 
     // TODO: Put timer code in timer.c file, we can pass along the timer `FREQ` and `COUNT`
     timers_init(timer_callback);
