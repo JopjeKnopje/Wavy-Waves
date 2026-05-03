@@ -146,9 +146,13 @@ static void task_write_dac(void *param)
             continue;
         }
 
-		// TODO: 
-        uint16_t dac_value = (playback.s_data[playback.s_index] - 10160) * 40;
+        // uint16_t dac_value = (playback.s_data[playback.s_index] - 10160) + 2048;
+        uint16_t dac_value = (playback.s_data[playback.s_index] - 10140) + 2048;
         // uint16_t dac_value = playback.s_data[playback.s_index];
+
+		
+
+		ESP_LOGI(TAG, "dac_value: %u", dac_value);
 
         // TODO: Set eeprom to true?
         // ESP_LOGI(TAG, "dac index : %d", dac_handle->id);

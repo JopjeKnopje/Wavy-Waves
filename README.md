@@ -14,6 +14,8 @@ For the hardware take a look at [HARDWARE.md](HARDWARE.md)
 ## TODO
 - [ ] Proper logging system instead of just spamming the console with messages.
 - [ ] Serial interface to setup the upper and lower bound for the pressure sensors.
+- [ ] Dynamically allocate sensors based on array, I currently have to uncomment a bunch of code for this to happen. Pretty shit
+- [ ] Write sim to test wave environment, so we can easiliy develop code for it.
 
 ## Building the firmware
 Move into the directory of the device you want to build for, either.
